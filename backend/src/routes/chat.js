@@ -25,6 +25,17 @@ Tool-use rules:
 
 After a tool returns, summarize the actual numbers concisely. Be helpful and brief.`;
 
+// Builds the optional model-selection fields for a Hermes request.
+// Per Hermes docs, a bare `model` is ignored on /v1/chat/completions unless
+// `direct_model_requests` is enabled, so we only forward it alongside a provider.
+function buildModelFields({ model, provider, modelOptions }) {
+  const fields = {};
+  if (model && typeof model === 'string') fields.model = model;
+  if (provider && typeof provider === 'string') fields.provider = provider;
+  if (modelOptions && typeof modelOptions === 'object') fields.model_options = modelOptions;
+  return fields;
+}
+
 // Initialize table status service (connects to MQTT on first use)
 let tableServiceInitialized = false;
 
@@ -42,7 +53,7 @@ function ensureTableService() {
  * Body: { message: string, conversationId?: string, context?: object }
  */
 router.post('/', async (req, res) => {
-  const { message, conversationId, context } = req.body;
+  const { message, conversationId, context, model, provider, modelOptions } = req.body;
 
   if (!message || typeof message !== 'string' || message.trim().length === 0) {
     return res.status(400).json({ error: 'Message is required' });
@@ -95,6 +106,7 @@ router.post('/', async (req, res) => {
         ],
         stream: true,
         conversation_id: conversationId || undefined,
+        ...buildModelFields({ model, provider, modelOptions }),
       }),
     });
 
@@ -259,6 +271,48 @@ router.get('/status', async (req, res) => {
     },
     tableService: tableService.getStatus(),
   });
+});
+
+/**
+ * GET /api/chat/models
+ * Proxy Hermes' curated provider/model inventory (dashboard/TUI model picker).
+ * Returns a flattened list of { id, provider, label } for the frontend dropdown.
+ */
+router.get('/models', async (req, res) => {
+  try {
+    const refresh = req.query.refresh ? '?refresh=1' : '';
+    const resp = await fetch(`${HERMES_GATEWAY_URL}/api/model/options${refresh}`, {
+      headers: { 'Authorization': `Bearer ${HERMES_API_KEY}` },
+      signal: AbortSignal.timeout(8000),
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text();
+      return res.status(resp.status).json({ error: `Hermes model options error: ${errText}` });
+    }
+
+    const data = await resp.json();
+    // Hermes groups models under providers; flatten to a simple, UI-friendly list.
+    const providers = data.providers || data.data || [];
+    const models = [];
+    for (const p of providers) {
+      const providerSlug = p.provider || p.slug || p.id || p.name;
+      for (const m of (p.models || [])) {
+        const id = typeof m === 'string' ? m : (m.id || m.model || m.name);
+        if (!id) continue;
+        models.push({
+          id,
+          provider: providerSlug,
+          label: (typeof m === 'object' && (m.label || m.display_name)) || id,
+        });
+      }
+    }
+
+    res.json({ models, raw: data });
+  } catch (err) {
+    console.error('[Chat] Model options error:', err.message);
+    res.status(503).json({ error: `Hermes model options unavailable: ${err.message}` });
+  }
 });
 
 /**
