@@ -15,8 +15,9 @@ import { MatChipsModule } from '@angular/material/chips';
 import { MatProgressBarModule } from '@angular/material/progress-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatDividerModule } from '@angular/material/divider';
+import { MatSelectModule } from '@angular/material/select';
 import { Subscription } from 'rxjs';
-import { ChatService, ChatMessage, ChatStatus } from '../../services/chat.service';
+import { ChatService, ChatMessage, ChatStatus, ModelOption } from '../../services/chat.service';
 
 @Component({
   selector: 'app-chat',
@@ -24,7 +25,7 @@ import { ChatService, ChatMessage, ChatStatus } from '../../services/chat.servic
   imports: [
     CommonModule, FormsModule, MatCardModule, MatInputModule,
     MatButtonModule, MatIconModule, MatChipsModule, MatProgressBarModule,
-    MatTooltipModule, MatDividerModule,
+    MatTooltipModule, MatDividerModule, MatSelectModule,
   ],
   template: `
     <div class="chat-container">
@@ -82,6 +83,13 @@ import { ChatService, ChatMessage, ChatStatus } from '../../services/chat.servic
           <h2><mat-icon>smart_toy</mat-icon> Agent Chat</h2>
           <span class="chat-subtitle">Powered by Hermes + MCP Tools</span>
           <span class="spacer"></span>
+          <mat-form-field *ngIf="models.length" class="model-select" appearance="outline" subscriptSizing="dynamic">
+            <mat-label>Model</mat-label>
+            <mat-select [value]="selectedModelId" (selectionChange)="onModelChange($event.value)">
+              <mat-option [value]="null">Gateway default</mat-option>
+              <mat-option *ngFor="let m of models" [value]="m.id">{{ m.label }} <small>({{ m.provider }})</small></mat-option>
+            </mat-select>
+          </mat-form-field>
           <button mat-icon-button matTooltip="Clear conversation" (click)="clearChat()">
             <mat-icon>delete_sweep</mat-icon>
           </button>
@@ -274,6 +282,7 @@ import { ChatService, ChatMessage, ChatStatus } from '../../services/chat.servic
     }
     .chat-subtitle { font-size: 0.8em; color: var(--text-secondary, #666); }
     .spacer { flex: 1; }
+    .model-select { width: 220px; font-size: 0.85em; }
 
     .messages-container {
       flex: 1;
@@ -431,6 +440,8 @@ export class ChatComponent implements OnInit, OnDestroy, AfterViewChecked {
   isLoading = false;
   status: ChatStatus | null = null;
   tableList: { id: string; number: number; status: string }[] = [];
+  models: ModelOption[] = [];
+  selectedModelId: string | null = null;
 
   private subscription?: Subscription;
   private statusInterval: any;
@@ -460,6 +471,24 @@ export class ChatComponent implements OnInit, OnDestroy, AfterViewChecked {
     });
     this.refreshStatus();
     this.statusInterval = setInterval(() => this.refreshStatus(), 15000);
+    this.loadModels();
+  }
+
+  loadModels(): void {
+    this.chatService.getModels().subscribe({
+      next: res => {
+        this.models = res.models || [];
+        const current = this.chatService.getSelectedModel();
+        this.selectedModelId = current?.id ?? null;
+      },
+      error: () => { this.models = []; },
+    });
+  }
+
+  onModelChange(id: string | null): void {
+    this.selectedModelId = id;
+    const model = this.models.find(m => m.id === id) || null;
+    this.chatService.setSelectedModel(model);
   }
 
   ngOnDestroy(): void {

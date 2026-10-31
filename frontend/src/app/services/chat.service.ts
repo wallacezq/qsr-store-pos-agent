@@ -37,6 +37,12 @@ export interface ChatStatus {
   tableService: { connected: boolean; brokerUrl: string; tableCount: number; subscribedTopics: string[] };
 }
 
+export interface ModelOption {
+  id: string;
+  provider: string;
+  label: string;
+}
+
 @Injectable({ providedIn: 'root' })
 export class ChatService {
   private conversationId: string | null = null;
@@ -46,6 +52,8 @@ export class ChatService {
   private streamingSubject = new Subject<string>();
   streaming$ = this.streamingSubject.asObservable();
 
+  private selectedModel: ModelOption | null = null;
+
   constructor(private http: HttpClient) {}
 
   getMessages(): ChatMessage[] {
@@ -54,6 +62,18 @@ export class ChatService {
 
   getStatus(): Observable<ChatStatus> {
     return this.http.get<ChatStatus>('/api/chat/status');
+  }
+
+  getModels(refresh = false): Observable<{ models: ModelOption[] }> {
+    return this.http.get<{ models: ModelOption[] }>(`/api/chat/models${refresh ? '?refresh=1' : ''}`);
+  }
+
+  setSelectedModel(model: ModelOption | null): void {
+    this.selectedModel = model;
+  }
+
+  getSelectedModel(): ModelOption | null {
+    return this.selectedModel;
   }
 
   /**
@@ -86,6 +106,8 @@ export class ChatService {
           message: content,
           conversationId: this.conversationId,
           context: { history },
+          model: this.selectedModel?.id,
+          provider: this.selectedModel?.provider,
         }),
       }).then(async response => {
         if (!response.ok) {
