@@ -35,7 +35,7 @@ const TOOLS = [
   },
   {
     name: 'search_products',
-    description: 'Search products by name or category',
+    description: 'Search products by name or category. Call this for "find product", "do we sell X", "look up item", or filtering products by category.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -57,7 +57,7 @@ const TOOLS = [
   },
   {
     name: 'get_sales_summary',
-    description: 'Revenue summary with top products and category breakdown. Use days=0 for today only.',
+    description: 'Revenue summary with TOP PRODUCTS by revenue and category breakdown. Call this for questions like "top/best products by revenue", "overall sales", "how are we doing", "total revenue", "best sellers". Use days=0 for today only.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -78,7 +78,7 @@ const TOOLS = [
   },
   {
     name: 'get_sales_by_date',
-    description: 'Daily sales totals for trend analysis',
+    description: 'Daily sales totals over time for trend analysis. Call this for "sales trend", "revenue over the last N days", "daily sales", or charting sales by day.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -122,7 +122,7 @@ const TOOLS = [
   },
   {
     name: 'get_top_customers',
-    description: 'Top customers by spending',
+    description: 'Top customers by spending. Call this for "best customers", "top spenders", "who buys the most", or loyalty leaderboard questions.',
     inputSchema: {
       type: 'object',
       properties: {

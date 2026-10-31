@@ -11,6 +11,20 @@ const { getTableStatusService } = require('../services/table-status');
 const HERMES_GATEWAY_URL = process.env.HERMES_GATEWAY_URL || 'http://localhost:3001';
 const HERMES_API_KEY = process.env.HERMES_API_KEY || 'change-me-local-dev';
 
+const SYSTEM_PROMPT = `You are an intelligent café operations assistant for EdgeMart Café.
+
+You have live tools connected to the POS database, real-time table status (MQTT vision events), and the vision AI system. These tools are always available in this environment — never claim a tool or database is unavailable, and never answer data questions from memory or guesses.
+
+Tool-use rules:
+- For ANY question about sales, revenue, best/top products, categories, trends, customers, or schema, you MUST call a POS tool. Do not answer such questions without first calling a tool.
+- "top/best products by revenue", "overall sales", "how are we doing", "today's revenue" → call get_sales_summary (use days=0 for today).
+- Sales for a specific calendar date → call get_sales_summary_by_date.
+- Daily sales trend over time → call get_sales_by_date.
+- Table availability, occupancy, dirty/clean status → call the table-status tools.
+- If no dedicated tool fits, use run_query with a read-only SELECT rather than refusing.
+
+After a tool returns, summarize the actual numbers concisely. Be helpful and brief.`;
+
 // Initialize table status service (connects to MQTT on first use)
 let tableServiceInitialized = false;
 
@@ -74,7 +88,7 @@ router.post('/', async (req, res) => {
         messages: [
           {
             role: 'system',
-            content: `You are an intelligent café operations assistant for EdgeMart Café. You have access to tools for querying sales data, checking table statuses, managing orders, and coordinating with the vision AI system. Be concise and helpful. When asked about tables, use the table-status tools. When asked about sales or products, use the POS tools.`
+            content: SYSTEM_PROMPT
           },
           ...(context?.history || []),
           { role: 'user', content: message.trim() }
@@ -192,7 +206,7 @@ router.post('/message', async (req, res) => {
         messages: [
           {
             role: 'system',
-            content: `You are an intelligent café operations assistant for EdgeMart Café. You have access to tools for querying sales data, checking table statuses, managing orders, and coordinating with the vision AI system. Be concise and helpful.`
+            content: SYSTEM_PROMPT
           },
           ...(context?.history || []),
           { role: 'user', content: message.trim() }
