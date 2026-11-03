@@ -325,6 +325,9 @@ services:
     container_name: pos-qmmd
     restart: unless-stopped
     privileged: true
+    # Must run as root: fdinfo (-f) engine utilization requires reading other
+    # host processes' /proc/<pid>/fdinfo, which is ptrace/DAC-gated to root.
+    user: "0:0"
     pid: host
     network_mode: host
     security_opt:

@@ -62,6 +62,15 @@ function round(val) {
 let gpuData = { render: 0, compute: 0, video: 0, copy: 0, videoEnhance: 0, frequency: 0, power: 0, total: 0, available: false };
 let gpuPollInterval = null;
 
+// Maps qmmd engine labels (i915 full names + xe command-streamer abbreviations) to gpuData fields.
+const ENGINE_FIELD = {
+  render: 'render', rcs: 'render',
+  compute: 'compute', ccs: 'compute',
+  video: 'video', vcs: 'video',
+  copy: 'copy', bcs: 'copy',
+  'video-enhance': 'videoEnhance', vecs: 'videoEnhance',
+};
+
 function parsePrometheusLine(line) {
   // Format: metric_name{label="val",...} value
   const match = line.match(/^(\w+)\{([^}]*)\}\s+([\d.eE+-]+)$/);
@@ -100,14 +109,12 @@ async function pollGpuMetrics() {
     if (!parsed) continue;
 
     if (parsed.metric === 'qmmd_gpu_engine_utilization_ratio') {
-      const engine = parsed.labels.engine;
-      const pct = round(parsed.value * 100); // ratio → percent
-      if (engine === 'render') gpuData.render = pct;
-      else if (engine === 'compute') gpuData.compute = pct;
-      else if (engine === 'video') gpuData.video = pct;
-      else if (engine === 'copy') gpuData.copy = pct;
-      else if (engine === 'video-enhance') gpuData.videoEnhance = pct;
-      gpuData.available = true;
+      // i915 uses full engine names; xe uses command-streamer abbreviations.
+      const field = ENGINE_FIELD[parsed.labels.engine];
+      if (field) {
+        gpuData[field] = round(parsed.value * 100); // ratio → percent
+        gpuData.available = true;
+      }
     } else if (parsed.metric === 'qmmd_gpu_actual_frequency_hertz') {
       if (parsed.labels.freq_id === 'gt0') {
         gpuData.frequency = round(parsed.value / 1e6); // Hz → MHz
