@@ -100,7 +100,7 @@ interface WorkflowEvent {
         </div>
         <div class="kpi-card">
           <div class="kpi-ico">🏆</div>
-          <div class="kpi-value kpi-value-sm accent-amber">{{ topProduct || '—' }}</div>
+          <div class="kpi-value kpi-value-sm accent-amber">{{ topProduct || '-' }}</div>
           <div class="kpi-label">Top Product</div>
         </div>
       </section>
@@ -402,6 +402,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.todayRevenue = Number(stats?.total_revenue) || 0;
     this.avgOrder = Number(stats?.avg_transaction) || 0;
     this.monthSales = Number(stats?.total_revenue) || 0;
+    this.topProduct = stats?.top_product || '';
   }
 
   private applyTables(tables: TableState[]): void {
@@ -419,9 +420,6 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.lowStock = products
       .filter(p => p.is_active !== false && Number(p.stock_quantity) <= this.reorderPoint)
       .sort((a, b) => Number(a.stock_quantity) - Number(b.stock_quantity));
-
-    const top = [...products].sort((a, b) => Number(b.price) - Number(a.price))[0];
-    this.topProduct = top ? top.name : '';
 
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     this.detectionFeed = this.lowStock.slice(0, 4).map(p => ({

@@ -194,7 +194,23 @@ router.get('/stats/summary', async (req, res) => {
       WHERE created_at::date = $1
     `, [today], req.experience);
 
-    res.json(stats.rows[0]);
+    // Top-selling product today by units sold (not price).
+    const topProduct = await db.query(`
+      SELECT p.name, SUM(ti.quantity) as units_sold
+      FROM transaction_items ti
+      JOIN products p ON ti.product_id = p.id
+      JOIN transactions t ON ti.transaction_id = t.id
+      WHERE t.created_at::date = $1
+      GROUP BY p.id, p.name
+      ORDER BY units_sold DESC
+      LIMIT 1
+    `, [today], req.experience);
+
+    res.json({
+      ...stats.rows[0],
+      top_product: topProduct.rows[0]?.name || null,
+      top_product_units: topProduct.rows[0]?.units_sold || 0,
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch stats' });
