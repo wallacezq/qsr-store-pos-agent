@@ -7,6 +7,8 @@
 const express = require('express');
 const router = express.Router();
 const { getTableStatusService } = require('../services/table-status');
+const { randomUUID } = require('crypto');
+const mqttPublisher = require('../services/mqtt-publisher');
 
 const HERMES_GATEWAY_URL = process.env.HERMES_GATEWAY_URL || 'http://localhost:3001';
 const HERMES_API_KEY = process.env.HERMES_API_KEY || 'change-me-local-dev';
@@ -369,6 +371,36 @@ router.post('/tables/event', (req, res) => {
 
   tableService.updateTable(tableId, event, source || 'simulator-vision', metadata || {});
   res.json({ success: true, tableId, event, timestamp: new Date().toISOString() });
+});
+
+/**
+ * POST /api/chat/footfall/event
+ * Receive people-count observations derived from the café simulator and publish
+ * them to cafe/footfall/events so the dashboard feed sees live footfall driven
+ * by the running simulation.
+ * Body: { count: number, zone?: string }
+ */
+router.post('/footfall/event', (req, res) => {
+  const count = Number(req.body?.count);
+  const zone = typeof req.body?.zone === 'string' ? req.body.zone : 'cafe-floor';
+
+  if (!Number.isFinite(count) || count < 0) {
+    return res.status(400).json({ error: 'count (non-negative number) is required' });
+  }
+
+  const occurredAt = new Date().toISOString();
+  mqttPublisher.publish('cafe/footfall/events', {
+    event_id: randomUUID(),
+    event_type: 'footfall.count',
+    severity: 'info',
+    source: 'simulator-vision',
+    experience: 'cafe',
+    ref: zone,
+    occurred_at: occurredAt,
+    payload: { count, zone },
+  });
+
+  res.json({ success: true, count, zone, timestamp: occurredAt });
 });
 
 /**

@@ -78,6 +78,11 @@ export class CafeScene {
   onTransaction: ((orderType: 'dine-in' | 'takeout') => void) | null = null;
   onTableEvent: ((tableId: string, event: 'occupied' | 'dirty' | 'cleared', source: string) => void) | null = null;
   onTableCountChanged: ((totalTables: number) => void) | null = null;
+  onFootfall: ((count: number, zone: string) => void) | null = null;
+
+  // Footfall reporting cadence (sim-seconds between people-count observations).
+  private footfallTimer = 0;
+  private readonly footfallInterval = 5;
 
   get totalTableCount(): number {
     return this.floorTableCount + this.barSeatCount;
@@ -711,12 +716,32 @@ export class CafeScene {
     if (this.isActive) {
       this.updateCustomers(delta);
       this.updateStaff(delta);
+      this.footfallTimer += delta;
+      if (this.footfallTimer >= this.footfallInterval) {
+        this.footfallTimer = 0;
+        this.reportFootfall();
+      }
     }
     this.updateDollarEffects(rawDelta);
 
     this.orbitControls.update();
     this.renderer.render(this.scene, this.camera);
   };
+
+  // Derive per-zone people counts from current customer states so footfall
+  // reflects what is actually happening in the scene.
+  private reportFootfall(): void {
+    if (!this.onFootfall) return;
+    const zones: Record<string, number> = { entrance: 0, counter: 0, seating: 0 };
+    for (const c of this.customers) {
+      if (c.state === 'entering' || c.state === 'queuing' || c.state === 'leaving') zones['entrance']++;
+      else if (c.state === 'ordering' || c.state === 'waiting-drink') zones['counter']++;
+      else if (c.state === 'sitting') zones['seating']++;
+    }
+    for (const [zone, count] of Object.entries(zones)) {
+      this.onFootfall(count, zone);
+    }
+  }
 
   private updateCustomers(delta: number): void {
     for (const customer of this.customers) {

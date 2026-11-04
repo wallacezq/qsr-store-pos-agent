@@ -7,8 +7,9 @@
 const express = require('express');
 const router = express.Router();
 
-// Topic trees published by the sim services and the table-status vision bridge.
-const TOPIC_FILTERS = ['sim/#', 'footfall-sim/#', 'table-sim/#', 'cafe/#', 'pos/#'];
+// Mirror only what the Agent tab's table-status service observes: the café
+// simulator / vision events on the cafe/* topics (cafe/vision|pos|staff/events).
+const TOPIC_FILTERS = ['cafe/#'];
 const RING_SIZE = 100;
 
 let client = null;

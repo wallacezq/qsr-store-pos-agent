@@ -241,6 +241,9 @@ export class SimulatorComponent implements OnInit, AfterViewInit, OnDestroy {
       cafeScene.onTableEvent = (tableId, event, source) => {
         this.http.post('/api/chat/tables/event', { tableId, event, source }).subscribe();
       };
+      cafeScene.onFootfall = (count, zone) => {
+        this.http.post('/api/chat/footfall/event', { count, zone }).subscribe();
+      };
       this.scene = cafeScene;
     } else {
       const groceryScene = new GroceryScene(this.canvasRef.nativeElement);
