@@ -12,6 +12,7 @@ import { forkJoin, Subscription, interval } from 'rxjs';
 import { TransactionService, Transaction } from '../../services/transaction.service';
 import { ProductService, Product } from '../../services/product.service';
 import { ThemeService } from '../../services/theme.service';
+import { ExperienceService } from '../../services/experience.service';
 
 interface TableState {
   id: string;
@@ -20,12 +21,24 @@ interface TableState {
   occupiedBy?: string | null;
 }
 
-interface FeedItem {
+interface RawEvent {
+  topic: string;
+  eventType: string;
+  severity: string;
+  experience: string | null;
+  source: string;
+  ref: string | null;
+  occurredAt: string;
+  payload: any;
+}
+
+interface WorkflowEvent {
   tag: string;
-  tagClass: string;
-  label: string;
+  severity: string;
+  source: string;
   text: string;
   time: string;
+  topic: string;
 }
 
 @Component({
@@ -33,54 +46,13 @@ interface FeedItem {
   standalone: true,
   imports: [CommonModule, RouterModule],
   template: `
-  <div class="ops-hub" [class.collapsed]="collapsed">
-    <!-- Sidebar -->
-    <aside class="sidebar">
-      <div class="brand">
-        <span class="brand-mark">◎</span>
-        <span class="brand-text">tapway<span class="brand-dot">●</span></span>
-      </div>
-
-      <nav class="nav">
-        <a class="nav-item active">
-          <span class="nav-ico">🟢</span><span class="nav-label">Dashboard</span>
-          <span class="nav-live"></span>
-        </a>
-        <a class="nav-item" routerLink="/simulator">
-          <span class="nav-ico">🧊</span><span class="nav-label">3D Cafe</span>
-        </a>
-        <a class="nav-item" routerLink="/pos">
-          <span class="nav-ico">🛒</span><span class="nav-label">Sales</span>
-        </a>
-        <a class="nav-item" routerLink="/chat">
-          <span class="nav-ico">👥</span><span class="nav-label">CRM</span>
-        </a>
-        <a class="nav-item" routerLink="/transactions">
-          <span class="nav-ico">📦</span><span class="nav-label">Inventory</span>
-        </a>
-        <a class="nav-item" routerLink="/config">
-          <span class="nav-ico">⚙️</span><span class="nav-label">Operations</span>
-        </a>
-      </nav>
-
-      <div class="sidebar-footer">
-        <button class="foot-btn" (click)="collapsed = !collapsed">
-          <span>{{ collapsed ? '›' : '‹' }}</span><span class="nav-label">Collapse</span>
-        </button>
-        <button class="foot-btn" (click)="themeService.toggleTheme()">
-          <span>{{ themeService.isDark() ? '🌙' : '🔆' }}</span>
-          <span class="nav-label">{{ themeService.isDark() ? 'Dark Mode' : 'Light Mode' }}</span>
-        </button>
-        <div class="tagline">Turning Vision into Actions</div>
-      </div>
-    </aside>
-
+  <div class="ops-hub">
     <!-- Main content -->
     <main class="content">
       <!-- Header -->
       <header class="hub-header">
         <div class="hub-title">
-          <h1>Cafe Operations Hub</h1>
+          <h1>Operation Insights</h1>
           <span class="badge-nrf">NRF 2026</span>
         </div>
         <div class="live-indicator"><span class="live-dot"></span> LIVE</div>
@@ -209,37 +181,27 @@ interface FeedItem {
         </div>
       </section>
 
-      <!-- Bottom row: workflow events | agent activity -->
+      <!-- Bottom row: workflow engine events (live MQTT feed) -->
       <section class="bot-grid">
         <div class="panel">
           <div class="panel-head">
             <span class="panel-title">🏃 Workflow Engine Events</span>
-            <span class="panel-conn"><span class="conn-dot"></span> Connected</span>
+            <span class="panel-conn" [class.offline]="!eventsConnected">
+              <span class="conn-dot"></span> {{ eventsConnected ? 'Connected' : 'Disconnected' }}
+            </span>
           </div>
           <div class="event-list">
             <div class="event-row" *ngFor="let e of workflowEvents">
               <div class="event-top">
-                <span class="event-tag">🏃 {{ e.tag }}</span>
+                <span class="event-tag" [ngClass]="'sev-' + e.severity">🏃 {{ e.tag }}</span>
+                <span class="event-src">{{ e.source }}</span>
+                <span class="event-time">{{ e.time }}</span>
               </div>
               <div class="event-text">{{ e.text }}</div>
-              <div class="event-meta">{{ e.time }} · Testing <span class="match">{{ e.label }}</span></div>
+              <div class="event-meta">{{ e.topic }}</div>
             </div>
-          </div>
-        </div>
-
-        <div class="panel">
-          <div class="panel-head">
-            <span class="panel-title">⚡ Live Agent Activity</span>
-          </div>
-          <div class="agent-list">
-            <div class="agent-row" *ngFor="let a of agentActivity">
-              <div class="agent-top">
-                <span class="agent-dot" [ngClass]="a.tagClass"></span>
-                <span class="agent-tag" [ngClass]="a.tagClass">{{ a.tag }}</span>
-                <span class="agent-sub">{{ a.label }}</span>
-                <span class="agent-time">{{ a.time }}</span>
-              </div>
-              <div class="agent-text">{{ a.text }}</div>
+            <div class="event-empty" *ngIf="!workflowEvents.length">
+              Waiting for MQTT workflow events…
             </div>
           </div>
         </div>
@@ -250,144 +212,100 @@ interface FeedItem {
   styles: [`
     :host { display: block; }
     .ops-hub {
-      display: grid;
-      grid-template-columns: 210px 1fr;
       min-height: calc(100vh - 64px);
-      background: #0a0e1a;
-      color: #e5e7eb;
+      background: var(--bg-primary);
+      color: var(--text-primary);
       font-family: 'Roboto', sans-serif;
+      transition: background-color 0.3s, color 0.3s;
     }
-    .ops-hub.collapsed { grid-template-columns: 64px 1fr; }
-    .ops-hub.collapsed .nav-label,
-    .ops-hub.collapsed .brand-text,
-    .ops-hub.collapsed .tagline { display: none; }
-
-    /* Sidebar */
-    .sidebar {
-      background: #0b1020;
-      border-right: 1px solid #1b2436;
-      display: flex;
-      flex-direction: column;
-      padding: 18px 12px;
-    }
-    .brand { display: flex; align-items: center; gap: 8px; padding: 4px 8px 22px; font-weight: 700; }
-    .brand-mark { color: #34d399; font-size: 20px; }
-    .brand-text { font-size: 18px; letter-spacing: .5px; }
-    .brand-dot { color: #34d399; font-size: 10px; margin-left: 2px; }
-    .nav { display: flex; flex-direction: column; gap: 6px; flex: 1; }
-    .nav-item {
-      display: flex; align-items: center; gap: 12px;
-      padding: 11px 12px; border-radius: 8px;
-      color: #94a3b8; cursor: pointer; text-decoration: none;
-      font-size: 14px; font-weight: 500; transition: background .2s, color .2s;
-    }
-    .nav-item:hover { background: #121a2b; color: #e5e7eb; }
-    .nav-item.active { background: #13311f; color: #34d399; }
-    .nav-ico { width: 18px; text-align: center; }
-    .nav-live { width: 7px; height: 7px; border-radius: 50%; background: #34d399; margin-left: auto; }
-    .sidebar-footer { display: flex; flex-direction: column; gap: 6px; padding-top: 14px; border-top: 1px solid #1b2436; }
-    .foot-btn {
-      display: flex; align-items: center; gap: 12px; background: none; border: none;
-      color: #94a3b8; cursor: pointer; padding: 9px 12px; border-radius: 8px;
-      font-size: 13px; font-family: inherit; text-align: left;
-    }
-    .foot-btn:hover { background: #121a2b; color: #e5e7eb; }
-    .tagline { font-size: 11px; color: #4b5873; padding: 8px 12px 0; }
 
     /* Content */
     .content { padding: 18px 22px 28px; overflow-x: hidden; }
     .hub-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
     .hub-title { display: flex; align-items: center; gap: 12px; }
     .hub-title h1 { font-size: 20px; font-weight: 700; }
-    .badge-nrf { font-size: 10px; font-weight: 700; color: #34d399; background: #10271c; border: 1px solid #1f4d36; padding: 3px 8px; border-radius: 10px; }
-    .live-indicator { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: #34d399; letter-spacing: .5px; }
-    .live-dot { width: 8px; height: 8px; border-radius: 50%; background: #34d399; animation: pulse 1.6s infinite; }
+    .badge-nrf { font-size: 10px; font-weight: 700; color: var(--success); background: rgba(76,175,80,.14); border: 1px solid rgba(76,175,80,.4); padding: 3px 8px; border-radius: 10px; }
+    .live-indicator { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--success); letter-spacing: .5px; }
+    .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); animation: pulse 1.6s infinite; }
     @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.35;} }
 
     /* KPI cards */
     .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 14px; }
     .kpi-card {
-      background: #0f1626; border: 1px solid #1b2436; border-radius: 12px;
+      background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
       padding: 16px 18px; min-height: 96px; position: relative;
+      transition: background-color 0.3s, border-color 0.3s;
     }
     .kpi-ico { position: absolute; top: 14px; left: 16px; font-size: 18px; opacity: .9; }
-    .kpi-ico.dot-green { color: #34d399; font-size: 22px; }
+    .kpi-ico.dot-green { color: var(--success); font-size: 22px; }
     .kpi-value { font-size: 26px; font-weight: 700; margin-top: 30px; }
     .kpi-value-sm { font-size: 16px; }
-    .kpi-label { font-size: 12px; color: #7c89a3; margin-top: 4px; }
-    .accent-green { color: #34d399; }
+    .kpi-label { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+    .accent-green { color: var(--success); }
     .accent-blue { color: #38bdf8; }
     .accent-purple { color: #a78bfa; }
-    .accent-amber { color: #fbbf24; }
+    .accent-amber { color: #f0a020; }
 
     /* Panels */
-    .panel { background: #0f1626; border: 1px solid #1b2436; border-radius: 12px; padding: 16px; }
+    .panel { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; transition: background-color 0.3s, border-color 0.3s; }
     .panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
     .panel-title { font-size: 14px; font-weight: 700; }
-    .panel-time, .panel-flag, .panel-conn { font-size: 11px; color: #7c89a3; }
-    .panel-flag { color: #f87171; }
-    .panel-conn { display: flex; align-items: center; gap: 5px; color: #34d399; }
-    .conn-dot { width: 7px; height: 7px; border-radius: 50%; background: #34d399; }
+    .panel-time, .panel-flag, .panel-conn { font-size: 11px; color: var(--text-secondary); }
+    .panel-flag { color: #e5484d; }
+    .panel-conn { display: flex; align-items: center; gap: 5px; color: var(--success); }
+    .conn-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
 
     .mid-grid { display: grid; grid-template-columns: 1.3fr 1fr 1.3fr; gap: 14px; margin-bottom: 14px; }
-    .bot-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .bot-grid { display: grid; grid-template-columns: 1fr; gap: 14px; }
 
     /* Trend chart */
     .trend-chart { width: 100%; height: 220px; }
-    .trend-chart .grid line { stroke: #1b2436; stroke-width: 1; }
-    .trend-chart .axis-labels text, .trend-chart .x-labels text { fill: #5b6a85; font-size: 9px; }
-    .trend-area { fill: rgba(52,211,153,.12); stroke: none; }
-    .trend-line { fill: none; stroke: #34d399; stroke-width: 2; }
-    .trend-dot { fill: #34d399; }
+    .trend-chart .grid line { stroke: var(--border); stroke-width: 1; }
+    .trend-chart .axis-labels text, .trend-chart .x-labels text { fill: var(--text-secondary); font-size: 9px; }
+    .trend-area { fill: rgba(76,175,80,.14); stroke: none; }
+    .trend-line { fill: none; stroke: var(--success); stroke-width: 2; }
+    .trend-dot { fill: var(--success); }
 
     /* Gauge */
     .gauge-wrap { display: flex; align-items: center; gap: 16px; padding: 10px 0; }
     .gauge { width: 130px; height: 130px; flex-shrink: 0; }
-    .gauge-track { fill: none; stroke: #1b2436; stroke-width: 10; }
-    .gauge-fill { fill: none; stroke: #34d399; stroke-width: 10; stroke-linecap: round; transition: stroke-dashoffset .6s ease; }
-    .gauge-pct { fill: #34d399; font-size: 22px; font-weight: 700; }
+    .gauge-track { fill: none; stroke: var(--border); stroke-width: 10; }
+    .gauge-fill { fill: none; stroke: var(--success); stroke-width: 10; stroke-linecap: round; transition: stroke-dashoffset .6s ease; }
+    .gauge-pct { fill: var(--success); font-size: 22px; font-weight: 700; }
     .gauge-legend { flex: 1; }
-    .legend-main { font-size: 14px; color: #e5e7eb; }
-    .legend-main strong { color: #34d399; }
-    .legend-sub { font-size: 12px; color: #7c89a3; margin-top: 2px; }
-    .legend-line { height: 2px; background: linear-gradient(90deg,#34d399,transparent); margin-top: 16px; border-radius: 2px; }
+    .legend-main { font-size: 14px; color: var(--text-primary); }
+    .legend-main strong { color: var(--success); }
+    .legend-sub { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+    .legend-line { height: 2px; background: linear-gradient(90deg,var(--success),transparent); margin-top: 16px; border-radius: 2px; }
 
     /* Inventory */
     .inv-bars { display: flex; flex-direction: column; gap: 10px; }
     .inv-row { display: grid; grid-template-columns: 90px 1fr 24px; align-items: center; gap: 8px; }
-    .inv-name { font-size: 12px; color: #c7d0e0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .inv-bar { height: 6px; background: #1b2436; border-radius: 4px; overflow: hidden; }
-    .inv-fill { height: 100%; background: #ef4444; border-radius: 4px; }
-    .inv-qty { font-size: 12px; color: #94a3b8; text-align: right; }
-    .inv-empty { font-size: 12px; color: #7c89a3; }
-    .feed-sub { font-size: 11px; color: #5b6a85; margin: 16px 0 8px; }
+    .inv-name { font-size: 12px; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .inv-bar { height: 6px; background: var(--border); border-radius: 4px; overflow: hidden; }
+    .inv-fill { height: 100%; background: #e5484d; border-radius: 4px; }
+    .inv-qty { font-size: 12px; color: var(--text-secondary); text-align: right; }
+    .inv-empty { font-size: 12px; color: var(--text-secondary); }
+    .feed-sub { font-size: 11px; color: var(--text-secondary); margin: 16px 0 8px; }
     .detect-feed { display: flex; flex-direction: column; gap: 8px; max-height: 120px; overflow-y: auto; }
     .detect-row { display: flex; align-items: center; gap: 8px; font-size: 11px; }
-    .detect-text { flex: 1; color: #cbd5e1; }
-    .detect-time { color: #5b6a85; }
+    .detect-text { flex: 1; color: var(--text-primary); }
+    .detect-time { color: var(--text-secondary); }
 
-    /* Event / agent lists */
-    .event-list, .agent-list { display: flex; flex-direction: column; gap: 16px; max-height: 240px; overflow-y: auto; padding-right: 6px; }
-    .event-tag { font-size: 11px; font-weight: 700; color: #a78bfa; }
-    .event-text { font-size: 13px; color: #cbd5e1; margin: 4px 0; }
-    .event-meta { font-size: 10px; color: #5b6a85; }
-    .event-meta .match { color: #34d399; }
-
-    .agent-row { border-left: 2px solid #1b2436; padding-left: 10px; }
-    .agent-top { display: flex; align-items: center; gap: 6px; }
-    .agent-dot { width: 7px; height: 7px; border-radius: 50%; background: #34d399; }
-    .agent-tag { font-size: 10px; font-weight: 700; letter-spacing: .4px; }
-    .agent-sub { font-size: 10px; color: #5b6a85; }
-    .agent-time { font-size: 10px; color: #5b6a85; margin-left: auto; }
-    .agent-text { font-size: 12px; color: #cbd5e1; margin-top: 3px; }
-    .tag-compliance, .agent-tag.tag-compliance { color: #38bdf8; }
-    .tag-compliance.agent-dot { background: #38bdf8; }
-    .tag-operations, .agent-tag.tag-operations { color: #34d399; }
-    .tag-operations.agent-dot { background: #34d399; }
-    .tag-sales, .agent-tag.tag-sales { color: #fbbf24; }
-    .tag-sales.agent-dot { background: #fbbf24; }
-    .tag-inventory, .agent-tag.tag-inventory { color: #f87171; }
-    .tag-inventory.agent-dot { background: #f87171; }
+    /* Workflow event list (live MQTT feed) */
+    .event-list { display: flex; flex-direction: column; gap: 14px; max-height: 300px; overflow-y: auto; padding-right: 6px; }
+    .event-row { border-left: 2px solid #1b2436; padding-left: 10px; }
+    .event-top { display: flex; align-items: center; gap: 8px; }
+    .event-tag { font-size: 11px; font-weight: 700; color: #8b5cf6; }
+    .event-tag.sev-warning { color: #f0a020; }
+    .event-tag.sev-critical { color: #e5484d; }
+    .event-src { font-size: 10px; color: var(--text-secondary); }
+    .event-time { font-size: 10px; color: var(--text-secondary); margin-left: auto; }
+    .event-text { font-size: 13px; color: var(--text-primary); margin: 4px 0; }
+    .event-meta { font-size: 10px; color: var(--text-secondary); }
+    .event-empty { font-size: 12px; color: var(--text-secondary); padding: 8px 0; }
+    .panel-conn.offline { color: #e5484d; }
+    .panel-conn.offline .conn-dot { background: #e5484d; }
 
     @media (max-width: 1100px) {
       .kpi-grid { grid-template-columns: repeat(2, 1fr); }
@@ -396,7 +314,6 @@ interface FeedItem {
   `]
 })
 export class DashboardComponent implements OnInit, OnDestroy {
-  collapsed = false;
   clock = '';
 
   // KPIs
@@ -429,14 +346,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
   yLabels: number[] = [];
   hourLabels = ['8:00', '9:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00'];
 
-  // Demo feeds
-  workflowEvents: FeedItem[] = [
-    { tag: 'PEOPLE_DETECTION', tagClass: '', label: '88% match', text: 'Multiple individuals are visible, including two standing in the foreground and others working in the background aisles.', time: '06:58:37 am' },
-    { tag: 'PEOPLE_DETECTION', tagClass: '', label: '88% match', text: 'Multiple individuals are visible, including one walking in the foreground and others in the background.', time: '06:59:49 am' },
-    { tag: 'PEOPLE_DETECTION', tagClass: '', label: '88% match', text: 'Multiple individuals are visible walking through the warehouse aisles and working near equipment.', time: '07:00:11 am' },
-    { tag: 'PEOPLE_DETECTION', tagClass: '', label: '85% match', text: 'Multiple workers are visible throughout the facility.', time: '07:00:44 am' }
-  ];
-  agentActivity: FeedItem[] = [];
+  // Workflow Engine Events — live MQTT feed
+  workflowEvents: WorkflowEvent[] = [];
+  eventsConnected = false;
+  private eventSource: EventSource | null = null;
+  private readonly maxEvents = 50;
 
   private subs: Subscription[] = [];
 
@@ -444,7 +358,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
     private http: HttpClient,
     private txService: TransactionService,
     private productService: ProductService,
-    public themeService: ThemeService
+    public themeService: ThemeService,
+    private experienceService: ExperienceService
   ) {}
 
   ngOnInit(): void {
@@ -452,10 +367,13 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.subs.push(interval(1000).subscribe(() => this.tickClock()));
     this.loadData();
     this.subs.push(interval(15000).subscribe(() => this.loadData()));
+    this.loadRecentEvents();
+    this.connectEvents();
   }
 
   ngOnDestroy(): void {
     this.subs.forEach(s => s.unsubscribe());
+    this.eventSource?.close();
   }
 
   private tickClock(): void {
@@ -466,16 +384,15 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.subs.push(
       forkJoin({
         stats: this.txService.getStats(),
-        tables: this.http.get<TableState[]>('/api/chat/tables'),
+        tables: this.http.get<Record<string, TableState>>('/api/chat/tables'),
         products: this.productService.getProducts(),
         txns: this.txService.getTransactions({ limit: 200 })
       }).subscribe({
         next: ({ stats, tables, products, txns }) => {
           this.applyStats(stats);
-          this.applyTables(tables || []);
+          this.applyTables(Object.values(tables || {}));
           this.applyProducts(products || []);
           this.buildTrend(txns || []);
-          this.buildAgentActivity(tables || [], txns || []);
         },
         error: () => { /* keep last-known values on transient errors */ }
       })
@@ -548,33 +465,61 @@ export class DashboardComponent implements OnInit, OnDestroy {
     }
   }
 
-  private buildAgentActivity(tables: TableState[], txns: Transaction[]): void {
-    const feed: FeedItem[] = [];
-    const time = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  private loadRecentEvents(): void {
+    const exp = this.experienceService.current;
+    this.subs.push(
+      this.http.get<{ connected: boolean; events: RawEvent[] }>(`/api/events/recent?experience=${exp}`).subscribe({
+        next: ({ connected, events }) => {
+          this.eventsConnected = connected;
+          this.workflowEvents = (events || []).slice(0, this.maxEvents).map(e => this.toWorkflowEvent(e));
+        },
+        error: () => { /* stream will still try to connect */ }
+      })
+    );
+  }
 
-    feed.push({ tag: 'COMPLIANCE', tagClass: 'tag-compliance', label: 'compliance_audit', text: '**Kitchen Compliance Audit #821**', time: time() });
+  private connectEvents(): void {
+    const exp = this.experienceService.current;
+    this.eventSource = new EventSource(`/api/events/stream?experience=${exp}`);
+    this.eventSource.onopen = () => { this.eventsConnected = true; };
+    this.eventSource.onerror = () => { this.eventsConnected = false; };
+    this.eventSource.onmessage = (msg) => {
+      try {
+        const raw: RawEvent = JSON.parse(msg.data);
+        this.workflowEvents = [this.toWorkflowEvent(raw), ...this.workflowEvents].slice(0, this.maxEvents);
+        this.eventsConnected = true;
+      } catch { /* ignore malformed frames */ }
+    };
+  }
 
-    const dirty = tables.find(t => t.status === 'dirty');
-    if (dirty) {
-      feed.push({ tag: 'OPERATIONS', tagClass: 'tag-operations', label: 'cleaning', text: `🧹 ${dirty.id} is dirty — cleaning dispatched`, time: time() });
+  private toWorkflowEvent(e: RawEvent): WorkflowEvent {
+    return {
+      tag: (e.eventType || 'event').replace(/[._]/g, ' ').toUpperCase(),
+      severity: e.severity || 'info',
+      source: e.source || 'mqtt',
+      text: this.describeEvent(e),
+      time: new Date(e.occurredAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      topic: e.topic
+    };
+  }
+
+  private describeEvent(e: RawEvent): string {
+    const p = e.payload || {};
+    const ref = e.ref ? ` [${e.ref}]` : '';
+    switch (e.eventType) {
+      case 'customer.arrived': return `Customer arrived${p.zone ? ' in ' + p.zone : ''}.`;
+      case 'customer.departed': return `Customer departed${ref}.`;
+      case 'table.occupied': return `Table occupied${ref}.`;
+      case 'table.dirty': return `Table needs cleaning${ref}.`;
+      case 'table.cleared': return `Table cleared and clean${ref}.`;
+      case 'order.placed': return `Order placed${p.total ? ' — ' + p.total : ''}${ref}.`;
+      case 'order.completed': return `Order completed${ref}.`;
+      case 'queue.depth_changed': return `Queue depth is now ${p.depth ?? '—'}.`;
+      case 'footfall.count': return `${p.count ?? '—'} people detected${p.zone ? ' in ' + p.zone : ''}.`;
+      case 'zone.density_changed': return `Zone density changed to ${p.level ?? '—'}${p.zone ? ' in ' + p.zone : ''}.`;
+      default:
+        if (p.message) return String(p.message);
+        return `${e.eventType}${ref}`;
     }
-
-    const latest = txns[0];
-    if (latest) {
-      const items = (latest.items || []).map(i => `${i.quantity}x ${i.product_name}`).join(', ');
-      feed.push({ tag: 'SALES', tagClass: 'tag-sales', label: `txn #${latest.transaction_number}`, text: `${items || 'Order'} — RM ${Number(latest.total).toFixed(2)} (${latest.customer_name || latest.staff_name || 'Guest'})`, time: time() });
-    }
-
-    const low = this.lowStock[0];
-    if (low) {
-      feed.push({ tag: 'SMART-INVENTORY', tagClass: 'tag-inventory', label: 'low_stock', text: `⚠️ Low stock: ${low.name} (${low.stock_quantity} left, reorder at ${this.reorderPoint}). Alert triggered.`, time: time() });
-    }
-
-    const occupied = tables.find(t => t.status === 'occupied');
-    if (occupied) {
-      feed.push({ tag: 'OPERATIONS', tagClass: 'tag-operations', label: 'seating', text: `🧍 ${occupied.occupiedBy || 'Guest'} seated at ${occupied.id}`, time: time() });
-    }
-
-    this.agentActivity = feed;
   }
 }

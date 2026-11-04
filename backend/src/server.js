@@ -19,6 +19,7 @@ const settingsRoutes = require('./routes/settings');
 const mcpRoutes = require('./routes/mcp');
 const chatRoutes = require('./routes/chat');
 const metricsRoutes = require('./routes/metrics');
+const eventsRoutes = require('./routes/events');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -57,6 +58,7 @@ app.use('/api/settings', settingsRoutes);
 app.use('/api/mcp', mcpRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/metrics', metricsRoutes);
+app.use('/api/events', eventsRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
