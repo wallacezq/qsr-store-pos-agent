@@ -56,6 +56,17 @@ const TOOLS = [
     },
   },
   {
+    name: 'get_last_replenished',
+    description: 'Get when a product was last replenished/restocked (its last_replenished_at time) and current stock. Call this for "when was X last replenished", "last restock time", or "how long since we restocked X". Match by product name, SKU, or ID.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Product name (partial match allowed), SKU, or barcode' },
+        id: { type: 'string', description: 'Product UUID (optional, exact match)' },
+      },
+    },
+  },
+  {
     name: 'get_sales_summary',
     description: 'Revenue summary with TOP PRODUCTS by revenue and category breakdown. Call this for questions like "top/best products by revenue", "overall sales", "how are we doing", "total revenue", "best sellers". Use days=0 for today only.',
     inputSchema: {
@@ -186,6 +197,29 @@ async function handleTool(name, args) {
       }
       const result = await pool.query(query, params);
       return result.rows[0] || { error: 'Product not found' };
+    }
+
+    case 'get_last_replenished': {
+      // Tolerate databases provisioned before the column existed.
+      await pool.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS last_replenished_at TIMESTAMPTZ');
+      let query, params;
+      if (args.id) {
+        query = `SELECT id, name, sku, stock_quantity, last_replenished_at FROM products WHERE id = $1`;
+        params = [args.id];
+      } else if (args.query) {
+        query = `SELECT id, name, sku, stock_quantity, last_replenished_at FROM products
+                 WHERE name ILIKE $1 OR sku ILIKE $1 OR barcode ILIKE $1
+                 ORDER BY name LIMIT 10`;
+        params = [`%${args.query}%`];
+      } else {
+        return { error: 'Provide a product name/sku via "query", or a product "id"' };
+      }
+      const result = await pool.query(query, params);
+      if (result.rows.length === 0) return { error: 'Product not found' };
+      return result.rows.map((r) => ({
+        ...r,
+        last_replenished_at: r.last_replenished_at || 'never (no replenish recorded)',
+      }));
     }
 
     case 'get_sales_summary': {

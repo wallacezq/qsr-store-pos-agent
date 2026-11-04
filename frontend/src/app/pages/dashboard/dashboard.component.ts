@@ -53,7 +53,6 @@ interface WorkflowEvent {
       <header class="hub-header">
         <div class="hub-title">
           <h1>Operation Insights</h1>
-          <span class="badge-nrf">NRF 2026</span>
         </div>
         <div class="live-indicator"><span class="live-dot"></span> LIVE</div>
       </header>
@@ -224,7 +223,6 @@ interface WorkflowEvent {
     .hub-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
     .hub-title { display: flex; align-items: center; gap: 12px; }
     .hub-title h1 { font-size: 20px; font-weight: 700; }
-    .badge-nrf { font-size: 10px; font-weight: 700; color: var(--success); background: rgba(76,175,80,.14); border: 1px solid rgba(76,175,80,.4); padding: 3px 8px; border-radius: 10px; }
     .live-indicator { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--success); letter-spacing: .5px; }
     .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); animation: pulse 1.6s infinite; }
     @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.35;} }

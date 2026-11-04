@@ -132,6 +132,16 @@ import { SettingsService, Settings } from '../../services/settings.service';
               color="accent">
             </mat-slide-toggle>
           </div>
+
+          <div class="setting-row">
+            <div class="setting-info">
+              <div class="setting-label">Replenish Stock</div>
+              <div class="setting-desc">Set the stock level of all active products to 999 units for the {{ experienceService.current }} database</div>
+            </div>
+            <button mat-raised-button color="primary" (click)="replenishStock()">
+              <mat-icon>inventory_2</mat-icon> Replenish
+            </button>
+          </div>
         </mat-card-content>
       </mat-card>
 
@@ -474,6 +484,17 @@ export class ConfigComponent implements OnInit, OnDestroy {
       },
       error: () => {
         this.snackBar.open('Failed to clear transactions', 'OK', { duration: 3000 });
+      }
+    });
+  }
+
+  replenishStock(): void {
+    this.settingsService.replenishStock().subscribe({
+      next: (r) => {
+        this.snackBar.open(`Stock replenished to 999 units for ${r.updated} products`, 'OK', { duration: 3000 });
+      },
+      error: () => {
+        this.snackBar.open('Failed to replenish stock', 'OK', { duration: 3000 });
       }
     });
   }

@@ -8,7 +8,7 @@ const express = require('express');
 const router = express.Router();
 
 // Topic trees published by the sim services and the table-status vision bridge.
-const TOPIC_FILTERS = ['sim/#', 'footfall-sim/#', 'table-sim/#', 'cafe/#'];
+const TOPIC_FILTERS = ['sim/#', 'footfall-sim/#', 'table-sim/#', 'cafe/#', 'pos/#'];
 const RING_SIZE = 100;
 
 let client = null;

@@ -29,4 +29,8 @@ export class SettingsService {
   clearTransactions(): Observable<{ message: string }> {
     return this.http.delete<{ message: string }>(`${this.apiUrl}/transactions`);
   }
+
+  replenishStock(): Observable<{ message: string; updated: number }> {
+    return this.http.post<{ message: string; updated: number }>(`${this.apiUrl}/replenish-stock`, {});
+  }
 }

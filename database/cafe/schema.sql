@@ -30,6 +30,7 @@ CREATE TABLE products (
     unit VARCHAR(20) DEFAULT 'each',
     image_url TEXT,
     is_active BOOLEAN DEFAULT TRUE,
+    last_replenished_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );

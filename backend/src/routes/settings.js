@@ -9,6 +9,8 @@ const router = express.Router();
 const path = require('path');
 const fs = require('fs');
 const db = require('../db');
+const { randomUUID } = require('crypto');
+const mqttPublisher = require('../services/mqtt-publisher');
 
 const SETTINGS_FILE = path.join(__dirname, '..', '..', 'settings.json');
 
@@ -63,6 +65,50 @@ router.delete('/transactions', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to clear transactions' });
+  }
+});
+
+// POST replenish stock - set all active products to 999 units
+router.post('/replenish-stock', async (req, res) => {
+  const experience = req.experience;
+  try {
+    // Ensure the timestamp column exists on already-provisioned databases.
+    await db.query(
+      'ALTER TABLE products ADD COLUMN IF NOT EXISTS last_replenished_at TIMESTAMPTZ',
+      [],
+      experience
+    );
+
+    const result = await db.query(
+      `UPDATE products SET stock_quantity = 999, last_replenished_at = NOW()
+       WHERE is_active = true
+       RETURNING id, name, sku, stock_quantity, last_replenished_at`,
+      [],
+      experience
+    );
+
+    const replenishedAt = result.rows[0]?.last_replenished_at || new Date().toISOString();
+
+    // Push an inventory event onto the broker so the workflow feed and any
+    // listeners can react; the agent reads last_replenished_at from the DB.
+    mqttPublisher.publish(`pos/${experience}/events/inventory.replenished`, {
+      event_id: randomUUID(),
+      event_type: 'inventory.replenished',
+      severity: 'info',
+      source: 'pos',
+      experience,
+      occurred_at: new Date(replenishedAt).toISOString(),
+      payload: {
+        level: 999,
+        product_count: result.rowCount,
+        products: result.rows.map((r) => ({ id: r.id, name: r.name, sku: r.sku })),
+      },
+    });
+
+    res.json({ message: 'Stock replenished', updated: result.rowCount, last_replenished_at: replenishedAt });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to replenish stock' });
   }
 });
 
