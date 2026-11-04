@@ -39,6 +39,9 @@ import { MetricsPanelComponent } from './components/metrics-panel/metrics-panel.
         </mat-button-toggle-group>
 
         <span class="spacer"></span>
+        <button mat-button routerLink="/dashboard" routerLinkActive="active-link">
+          <mat-icon>dashboard</mat-icon> Dashboard
+        </button>
         <button mat-button routerLink="/pos" routerLinkActive="active-link">
           <mat-icon>point_of_sale</mat-icon> POS
         </button>
