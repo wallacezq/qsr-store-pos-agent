@@ -14,6 +14,7 @@
   --accent: #e94560;
   --accent-hover: #ff6b6b;
   --border: #2a2a4a;
+  --border-color: #2a2a4a;
   --success: #4caf50;
   --warning: #ff9800;
 }
@@ -28,6 +29,7 @@
   --accent: #1976d2;
   --accent-hover: #1565c0;
   --border: #e0e0e0;
+  --border-color: #e0e0e0;
   --success: #4caf50;
   --warning: #ff9800;
 }
@@ -182,3 +184,80 @@ body {
   display: flex;
   gap: 8px;
 }
+
+/* ------------------------------------------------------------------ *
+ * Dark theme: Angular Material overrides.
+ * The app ships the prebuilt (light) indigo-pink theme, so Material
+ * surfaces stay light in dark mode. Re-point surfaces/text/borders at
+ * our theme variables. Scoped to .dark-theme, which the ThemeService
+ * also sets on <body> so CDK overlay panels are covered.
+ * ------------------------------------------------------------------ */
+.dark-theme {
+  // Cards
+  .mat-mdc-card {
+    background-color: var(--bg-card) !important;
+    color: var(--text-primary) !important;
+  }
+  .mat-mdc-card-title { color: var(--text-primary); }
+  .mat-mdc-card-subtitle { color: var(--text-secondary); }
+
+  // Tables
+  .mat-mdc-table { background-color: var(--bg-card) !important; }
+  .mat-mdc-header-row { background-color: var(--bg-card) !important; }
+  .mat-mdc-row { background-color: var(--bg-card) !important; }
+  .mat-mdc-header-cell {
+    color: var(--text-secondary) !important;
+    background-color: var(--bg-card) !important;
+    border-bottom-color: var(--border) !important;
+  }
+  .mat-mdc-cell {
+    color: var(--text-primary) !important;
+    border-bottom-color: var(--border) !important;
+  }
+  .mat-mdc-paginator {
+    background-color: var(--bg-card) !important;
+    color: var(--text-primary);
+  }
+
+  // Form fields / inputs / selects
+  .mat-mdc-text-field-wrapper,
+  .mdc-text-field--filled:not(.mdc-text-field--disabled) {
+    background-color: var(--bg-secondary) !important;
+  }
+  .mat-mdc-input-element,
+  .mat-mdc-select-value-text,
+  .mat-mdc-select-min-line,
+  .mat-mdc-form-field-infix { color: var(--text-primary) !important; }
+  .mat-mdc-select-placeholder,
+  .mat-mdc-form-field .mdc-floating-label,
+  .mat-mdc-form-field-hint,
+  .mat-mdc-select-arrow { color: var(--text-secondary) !important; }
+  .mdc-text-field--outlined .mdc-notched-outline__leading,
+  .mdc-text-field--outlined .mdc-notched-outline__notch,
+  .mdc-text-field--outlined .mdc-notched-outline__trailing { border-color: var(--border) !important; }
+
+  // Chips
+  .mat-mdc-chip {
+    background-color: var(--bg-secondary) !important;
+    color: var(--text-primary) !important;
+  }
+  .mat-mdc-chip .mdc-evolution-chip__text-label { color: var(--text-primary) !important; }
+
+  // Overlay panels: menus, select dropdowns, autocomplete
+  .mat-mdc-menu-panel,
+  .mat-mdc-select-panel,
+  .mat-mdc-autocomplete-panel {
+    background-color: var(--bg-secondary) !important;
+    color: var(--text-primary);
+  }
+  .mat-mdc-option { color: var(--text-primary) !important; }
+  .mat-mdc-option .mdc-list-item__primary-text { color: var(--text-primary) !important; }
+  .mat-mdc-option:hover:not(.mdc-list-item--disabled),
+  .mat-mdc-option.mat-mdc-option-active { background-color: rgba(255, 255, 255, 0.08) !important; }
+
+  // Dividers & menu item text
+  .mat-divider { border-top-color: var(--border) !important; }
+  .mat-mdc-menu-item .mdc-list-item__primary-text { color: var(--text-primary); }
+  .mat-mdc-menu-item .mat-icon { color: var(--text-secondary); }
+}
+
