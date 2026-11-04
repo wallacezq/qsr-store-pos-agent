@@ -9,6 +9,37 @@ const router = express.Router();
 const db = require('../db');
 const settingsRoutes = require('./settings');
 
+// Standalone sim-services whose MQTT event fanout the Sim toggle also controls.
+// URLs default to the docker-compose service names; override via env if needed.
+const SIM_SERVICES = [
+  { name: 'sim', url: process.env.SIM_SERVICE_URL || 'http://sim-service:3100', path: '/sim/control', apiKey: process.env.SIM_API_KEY },
+  { name: 'table-sim', url: process.env.TABLE_SIM_SERVICE_URL || 'http://table-sim-service:3200', path: '/table-sim/control', apiKey: process.env.TABLE_SIM_API_KEY },
+  { name: 'footfall-sim', url: process.env.FOOTFALL_SIM_SERVICE_URL || 'http://footfall-sim-service:3300', path: '/footfall-sim/control', apiKey: process.env.FOOTFALL_SIM_API_KEY },
+];
+
+// Fan the Sim on/off state out to every sim-service's fanout control. Best-effort:
+// a missing/unreachable service is logged, never fails the toggle request.
+async function syncSimServices(enabled) {
+  if (typeof fetch !== 'function') {
+    console.warn('[simulator] global fetch unavailable (Node < 18); cannot sync sim-services.');
+    return;
+  }
+  await Promise.all(SIM_SERVICES.map(async (svc) => {
+    try {
+      const headers = { 'Content-Type': 'application/json' };
+      if (svc.apiKey) headers['X-Api-Key'] = svc.apiKey;
+      const resp = await fetch(`${svc.url}${svc.path}`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ enabled }),
+      });
+      if (!resp.ok) console.warn(`[simulator] ${svc.name} control responded ${resp.status}`);
+    } catch (err) {
+      console.warn(`[simulator] Failed to reach ${svc.name} control: ${err.message}`);
+    }
+  }));
+}
+
 // POST - Generate a random simulator transaction
 router.post('/generate-transaction', async (req, res) => {
   const client = await db.getClient(req.experience);
@@ -145,6 +176,7 @@ router.put('/toggle', (req, res) => {
     simulatorEnabled = !simulatorEnabled;
   }
   broadcastState();
+  syncSimServices(simulatorEnabled); // best-effort fan-out; don't block the response
   res.json({ enabled: simulatorEnabled });
 });
 

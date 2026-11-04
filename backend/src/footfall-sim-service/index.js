@@ -112,6 +112,17 @@ async function main() {
     }
   });
 
+  // Runtime fanout control: pause/resume MQTT+SSE event fanout without a
+  // restart. The POS backend's Sim toggle calls this to stop/start the stream.
+  app.post('/footfall-sim/control', writeLimiter, requireApiKey(API_KEY), (req, res) => {
+    const { enabled } = req.body || {};
+    if (typeof enabled !== 'boolean') {
+      return res.status(400).json({ error: 'enabled (boolean) is required' });
+    }
+    hub.setEnabled(enabled);
+    res.json({ enabled, fanout: enabled ? 'on' : 'off' });
+  });
+
   // Plain-HTTP mirrors of the MCP read tools (no action tools — this service is read-only by design).
   app.get('/footfall-sim/event-types', (req, res) => {
     res.json(Object.entries(FOOTFALL_EVENT_TYPE_DESCRIPTIONS).map(([event_type, description]) => ({ event_type, description })));

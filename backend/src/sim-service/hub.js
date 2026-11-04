@@ -151,6 +151,12 @@ class SimEventHub extends EventEmitter {
     }
   }
 
+  /** Runtime toggle for event fanout (SSE + MQTT). The durable log is unaffected. */
+  setEnabled(enabled) {
+    this.enabled = enabled === true;
+    return this.enabled;
+  }
+
   /**
    * Publish an envelope: dedups by event_id, then fans out to SSE + MQTT
    * unless benchmark mode has disabled fanout. Always emits locally so an
