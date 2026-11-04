@@ -469,8 +469,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
     const exp = this.experienceService.current;
     this.subs.push(
       this.http.get<{ connected: boolean; events: RawEvent[] }>(`/api/events/recent?experience=${exp}`).subscribe({
-        next: ({ connected, events }) => {
-          this.eventsConnected = connected;
+        // Connection state is driven by the live SSE stream (connectEvents),
+        // not this one-shot backfill — the backend MQTT client may still be
+        // mid-connect when this responds, which would falsely read false.
+        next: ({ events }) => {
           this.workflowEvents = (events || []).slice(0, this.maxEvents).map(e => this.toWorkflowEvent(e));
         },
         error: () => { /* stream will still try to connect */ }
