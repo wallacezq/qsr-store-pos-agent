@@ -12,6 +12,8 @@ const mqttPublisher = require('../services/mqtt-publisher');
 
 const HERMES_GATEWAY_URL = process.env.HERMES_GATEWAY_URL || 'http://localhost:3001';
 const HERMES_API_KEY = process.env.HERMES_API_KEY || 'change-me-local-dev';
+// Max time to wait for the Hermes gateway to finish streaming before aborting.
+const CHAT_TIMEOUT_MS = parseInt(process.env.CHAT_TIMEOUT_MS || '90000', 10);
 
 const SYSTEM_PROMPT = `You are an intelligent café operations assistant for EdgeMart Café.
 
@@ -80,6 +82,7 @@ router.post('/', async (req, res) => {
 
   // Abort Hermes request if client disconnects
   const controller = new AbortController();
+  let timedOut = false;
   res.on('close', () => {
     if (!res.writableEnded) {
       controller.abort();
@@ -88,7 +91,7 @@ router.post('/', async (req, res) => {
   });
 
   try {
-    const fetchTimeout = setTimeout(() => controller.abort(), 300000); // 5 min max
+    const fetchTimeout = setTimeout(() => { timedOut = true; controller.abort(); }, CHAT_TIMEOUT_MS);
 
     const response = await fetch(`${HERMES_GATEWAY_URL}/v1/chat/completions`, {
       method: 'POST',
@@ -129,10 +132,13 @@ router.post('/', async (req, res) => {
       try {
         readResult = await reader.read();
       } catch (readErr) {
-        // Stream interrupted (Hermes dropped connection mid-response)
-        console.warn('[Chat] Stream read error:', readErr.message);
+        const timeoutSecs = Math.round(CHAT_TIMEOUT_MS / 1000);
+        const content = timedOut
+          ? `The agent timed out after ${timeoutSecs}s without completing. The model or a tool call may be slow or stuck — check the Hermes gateway and MCP servers.`
+          : `Stream interrupted: ${readErr.message}`;
+        console.warn(`[Chat] Stream read ${timedOut ? 'timeout' : 'error'}:`, readErr.message);
         if (!hasContent) {
-          res.write(`data: ${JSON.stringify({ type: 'error', content: `Stream interrupted: ${readErr.message}` })}\n\n`);
+          res.write(`data: ${JSON.stringify({ type: 'error', content })}\n\n`);
         }
         break;
       }
@@ -185,9 +191,13 @@ router.post('/', async (req, res) => {
     clearTimeout(fetchTimeout);
   } catch (err) {
     clearInterval(keepAlive);
-    console.error('[Chat] Hermes gateway error:', err.message);
+    const timeoutSecs = Math.round(CHAT_TIMEOUT_MS / 1000);
+    const content = timedOut
+      ? `The agent timed out after ${timeoutSecs}s before responding. Check that the Hermes gateway and the model backend are running at ${HERMES_GATEWAY_URL}.`
+      : `Connection failed: ${err.message}. Ensure the Hermes gateway is running at ${HERMES_GATEWAY_URL}`;
+    console.error(`[Chat] Hermes gateway ${timedOut ? 'timeout' : 'error'}:`, err.message);
     if (!res.writableEnded) {
-      res.write(`data: ${JSON.stringify({ type: 'error', content: `Connection failed: ${err.message}. Ensure the Hermes gateway is running at ${HERMES_GATEWAY_URL}` })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: 'error', content })}\n\n`);
       res.write('data: [DONE]\n\n');
       res.end();
     }
