@@ -181,11 +181,14 @@ import { ModelService, GroupedModels, VisionModel, NewModel, ModelPurpose, Visio
           </button>
         </div>
         <div class="export-jobs" *ngIf="exportJobs.length">
-          <div class="ejob" *ngFor="let j of exportJobs">
-            <span class="ejob-status" [ngClass]="'ej-' + j.status">{{ j.status }}</span>
-            <span class="ejob-name">{{ j.source }} \u00b7 {{ j.model }} \u2192 {{ j.name }}</span>
-            <span class="ejob-err" *ngIf="j.error" [title]="j.error">{{ j.error }}</span>
-            <span class="ejob-time">{{ j.startedAt | date:'HH:mm:ss' }}</span>
+          <div class="ejob-wrap" *ngFor="let j of exportJobs">
+            <div class="ejob">
+              <span class="ejob-status" [ngClass]="'ej-' + j.status">{{ j.status }}</span>
+              <span class="ejob-name">{{ j.source }} · {{ j.model }} → {{ j.name }}</span>
+              <span class="ejob-err" *ngIf="j.error" [title]="j.error">{{ j.error }}</span>
+              <span class="ejob-time">{{ j.startedAt | date:'HH:mm:ss' }}</span>
+            </div>
+            <pre class="ejob-log" *ngIf="j.status === 'failed' && j.log">{{ j.log }}</pre>
           </div>
         </div>
       </section>
@@ -287,6 +290,8 @@ import { ModelService, GroupedModels, VisionModel, NewModel, ModelPurpose, Visio
     .ejob-name { color: var(--text-primary); }
     .ejob-err { color: #e5484d; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .ejob-time { margin-left: auto; color: var(--text-secondary); font-family: 'Roboto Mono', monospace; }
+    .ejob-wrap { display: flex; flex-direction: column; gap: 4px; }
+    .ejob-log { background: #05070d; color: #cbd5e1; font-size: 10px; line-height: 1.4; max-height: 160px; overflow: auto; padding: 8px 10px; border-radius: 6px; white-space: pre-wrap; word-break: break-word; margin: 0; }
 
     .add-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 18px; }
     .add-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }

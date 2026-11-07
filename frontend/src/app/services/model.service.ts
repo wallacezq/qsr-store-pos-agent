@@ -68,6 +68,7 @@ export interface ExportJob {
   status: 'running' | 'success' | 'failed';
   xml: string | null;
   error: string | null;
+  log?: string;
   startedAt: string;
   endedAt: string | null;
 }

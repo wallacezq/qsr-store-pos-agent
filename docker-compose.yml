@@ -27,6 +27,9 @@ services:
       dockerfile: Dockerfile
     container_name: pos-backend
     restart: unless-stopped
+    # Run as root so the mounted docker socket (used to launch vision/exporter
+    # containers) is accessible; on Docker Desktop the socket is root-owned.
+    user: root
     ports:
       - "3000:3000"
     environment:

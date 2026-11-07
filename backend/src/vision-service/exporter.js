@@ -102,7 +102,12 @@ function startExport(input = {}) {
       }
     } else {
       job.status = 'failed';
-      if (!job.error) job.error = `exporter exited with code ${code}`;
+      if (!job.error) {
+        const tail = (job.log || '').trim().split('\n').slice(-3).join(' ').slice(-400);
+        job.error = tail
+          ? `exporter exited with code ${code}: ${tail}`
+          : `exporter exited with code ${code} (no output — is the edgemart/vision-exporter image built and the docker socket accessible?)`;
+      }
     }
   });
 
