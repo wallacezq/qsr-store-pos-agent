@@ -42,6 +42,24 @@ services:
       HERMES_GATEWAY_URL: ${HERMES_GATEWAY_URL:-http://host.docker.internal:3001}
       MQTT_BROKER_URL: mqtt://mqtt:1883
       QMMD_URL: http://host.docker.internal:9101
+      # --- Vision (DL Streamer via docker) ---
+      VISION_INVOKE: ${VISION_INVOKE:-docker}
+      VISION_DOCKER_IMAGE: ${VISION_DOCKER_IMAGE:-intel/dlstreamer:2026.3.0-ubuntu24-rc1}
+      VISION_DOCKER_NETWORK: edgemart-net
+      VISION_DEVICE: ${VISION_DEVICE:-CPU}
+      # Model files live on the vision_models volume (also mounted into the DL
+      # Streamer container). Real pipelines start only once models are present.
+      VISION_MODELS_DIR: ${VISION_MODELS_DIR:-vision_models}
+      # Registry JSON (cameras/models/settings) persists on the vision_data volume.
+      DATA_DIR: /app/data
+      # Optional ABSOLUTE host path for annotated snapshots (/snapshots).
+      VISION_SNAPSHOT_HOST_DIR: ${VISION_SNAPSHOT_DIR:-}
+      VISION_SNAPSHOT_DIR: /snapshots
+    volumes:
+      # Lets the backend launch sibling DL Streamer containers.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - vision_data:/app/data            # persists cameras/models/settings registry
+      - vision_models:/models:ro         # OpenVINO models, shared with vision containers
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -342,6 +360,12 @@ services:
 volumes:
   postgres_data:
   mqtt_data:
+  # Explicit names (no compose project prefix) so sibling DL Streamer containers
+  # launched via `docker run -v vision_models:/models` hit the same volume.
+  vision_data:
+    name: vision_data
+  vision_models:
+    name: vision_models
 
 # Fixed, well-known name so another container/compose project can join this
 # stack's network (e.g. `networks: { edgemart-net: { external: true } }`)

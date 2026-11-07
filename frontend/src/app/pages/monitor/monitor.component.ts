@@ -9,6 +9,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { interval, Subscription } from 'rxjs';
 import { CameraService, Camera, VisionEvent, NewCamera } from '../../services/camera.service';
+import { ModelService, GroupedModels, VisionModel, NewModel, ModelPurpose, VisionStatus } from '../../services/model.service';
 
 @Component({
   selector: 'app-monitor',
@@ -21,11 +22,23 @@ import { CameraService, Camera, VisionEvent, NewCamera } from '../../services/ca
         <span class="mon-eyebrow">AI Vision</span>
         <h1>Live Monitor</h1>
       </div>
-      <button class="btn-primary" (click)="showAdd = !showAdd">
+      <button class="btn-primary" *ngIf="tab === 'cameras'" (click)="showAdd = !showAdd">
         {{ showAdd ? 'Close' : '+ Add Camera' }}
       </button>
     </header>
 
+    <nav class="tabs">
+      <button class="tab" [class.active]="tab === 'cameras'" (click)="tab = 'cameras'">Cameras</button>
+      <button class="tab" [class.active]="tab === 'models'" (click)="tab = 'models'">Models</button>
+      <div class="vision-status" *ngIf="status">
+        <span class="vs-dot" [class.live]="status.realEnabled"></span>
+        {{ status.realEnabled ? 'DLStreamer' : 'Simulation' }} · {{ status.invoke }}
+        <span class="vs-img" *ngIf="status.realEnabled" [title]="status.image">{{ status.image }}</span>
+      </div>
+    </nav>
+
+    <!-- CAMERAS TAB -->
+    <ng-container *ngIf="tab === 'cameras'">
     <!-- Add camera form -->
     <section class="add-card" *ngIf="showAdd">
       <div class="add-grid">
@@ -61,9 +74,7 @@ import { CameraService, Camera, VisionEvent, NewCamera } from '../../services/ca
       <div class="feed-card" *ngFor="let cam of cameras">
         <div class="feed-top">
           <span class="feed-name">📹 {{ cam.name }}</span>
-          <span class="feed-badge" [class.detecting]="cam.status === 'detecting'">
-            {{ cam.status === 'detecting' ? 'DETECTING' : 'OFFLINE' }}
-          </span>
+          <span class="feed-badge" [ngClass]="healthClass(cam)">{{ healthLabel(cam) }}</span>
         </div>
         <div class="feed-view">
           <img *ngIf="!failed.has(cam.id)" [src]="feedUrl(cam)" (error)="onImgError(cam.id)" alt="feed">
@@ -127,6 +138,59 @@ import { CameraService, Camera, VisionEvent, NewCamera } from '../../services/ca
         </tbody>
       </table>
     </section>
+    </ng-container>
+
+    <!-- MODELS TAB -->
+    <ng-container *ngIf="tab === 'models'">
+      <section class="add-card">
+        <div class="add-grid">
+          <label>Name<input [(ngModel)]="modelDraft.name" placeholder="yolov8n"></label>
+          <label>Purpose
+            <select [(ngModel)]="modelDraft.purpose">
+              <option value="detection">Detection</option>
+              <option value="classification">Classification</option>
+              <option value="clip">CLIP (zero-shot)</option>
+            </select>
+          </label>
+          <label class="wide">Model path (.xml)<input [(ngModel)]="modelDraft.modelPath" placeholder="/models/yolov8n/yolov8n.xml"></label>
+          <label class="wide" *ngIf="modelDraft.purpose === 'clip'">Embeddings (.safetensors)<input [(ngModel)]="modelDraft.embeddingsPath" placeholder="/models/clip/table-states.safetensors"></label>
+          <label *ngIf="modelDraft.purpose === 'classification'">Labels file<input [(ngModel)]="modelDraft.labelsFile" placeholder="/models/labels.txt"></label>
+          <label>Device
+            <select [(ngModel)]="modelDraft.device">
+              <option value="">(camera default)</option>
+              <option value="CPU">CPU</option>
+              <option value="GPU">GPU</option>
+              <option value="NPU">NPU</option>
+            </select>
+          </label>
+        </div>
+        <div class="add-actions">
+          <span class="add-error" *ngIf="modelError">{{ modelError }}</span>
+          <button class="btn-primary" [disabled]="!modelDraft.modelPath || modelSaving" (click)="addModel()">
+            {{ modelSaving ? 'Adding…' : 'Add Model' }}
+          </button>
+        </div>
+      </section>
+
+      <section class="model-group" *ngFor="let g of purposeGroups">
+        <h3 class="mg-title">{{ g.label }} <span class="mg-count">{{ (models[g.key] || []).length }}</span></h3>
+        <div class="model-list">
+          <div class="model-row" *ngFor="let m of models[g.key]" [class.active]="m.active">
+            <div class="model-info">
+              <span class="model-name">{{ m.name }} <span class="active-pill" *ngIf="m.active">ACTIVE</span></span>
+              <span class="model-path">{{ m.modelPath }}</span>
+              <span class="model-path sub" *ngIf="m.embeddingsPath">⟐ {{ m.embeddingsPath }}</span>
+              <span class="model-path sub" *ngIf="m.labelsFile">🟐 {{ m.labelsFile }}</span>
+            </div>
+            <div class="model-controls">
+              <button class="icon-btn" *ngIf="!m.active" (click)="activateModel(m)" title="Set active">★</button>
+              <button class="icon-btn danger" (click)="removeModel(m)" title="Delete">🗑</button>
+            </div>
+          </div>
+          <div class="model-empty" *ngIf="!(models[g.key] || []).length">No {{ g.label.toLowerCase() }} models registered.</div>
+        </div>
+      </section>
+    </ng-container>
   </div>
   `,
   styles: [`
@@ -137,6 +201,33 @@ import { CameraService, Camera, VisionEvent, NewCamera } from '../../services/ca
     .mon-title h1 { font-size: 22px; font-weight: 700; }
     .btn-primary { background: var(--accent); color: #fff; border: none; border-radius: 8px; padding: 9px 16px; font-size: 13px; font-weight: 600; cursor: pointer; }
     .btn-primary:disabled { opacity: .5; cursor: default; }
+
+    .tabs { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--border); margin-bottom: 18px; }
+    .tab { background: none; border: none; color: var(--text-secondary); font-size: 13px; font-weight: 600; padding: 10px 14px; cursor: pointer; border-bottom: 2px solid transparent; }
+    .tab.active { color: var(--text-primary); border-bottom-color: var(--accent); }
+    .vision-status { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-secondary); }
+    .vs-dot { width: 8px; height: 8px; border-radius: 50%; background: #f0a020; }
+    .vs-dot.live { background: #34d399; }
+    .vs-img { color: var(--text-secondary); opacity: .8; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    .feed-badge.hb-detecting { color: #34d399; border-color: rgba(52,211,153,.4); }
+    .feed-badge.hb-starting { color: #f0a020; border-color: rgba(240,160,32,.4); }
+    .feed-badge.hb-sim { color: #38bdf8; border-color: rgba(56,189,248,.4); }
+    .feed-badge.hb-off { color: var(--text-secondary); }
+
+    .model-group { margin-bottom: 18px; }
+    .mg-title { font-size: 13px; font-weight: 700; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+    .mg-count { font-size: 11px; color: var(--text-secondary); background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 1px 8px; }
+    .model-list { display: flex; flex-direction: column; gap: 8px; }
+    .model-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+    .model-row.active { border-color: rgba(52,211,153,.5); }
+    .model-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .model-name { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+    .active-pill { font-size: 9px; font-weight: 700; color: #34d399; background: rgba(52,211,153,.14); border-radius: 8px; padding: 1px 6px; }
+    .model-path { font-size: 11px; color: var(--text-secondary); font-family: 'Roboto Mono', monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .model-path.sub { opacity: .8; }
+    .model-controls { display: flex; gap: 4px; flex-shrink: 0; }
+    .model-empty { font-size: 12px; color: var(--text-secondary); padding: 8px; }
 
     .add-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 18px; }
     .add-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
@@ -195,6 +286,7 @@ import { CameraService, Camera, VisionEvent, NewCamera } from '../../services/ca
   `]
 })
 export class MonitorComponent implements OnInit, OnDestroy {
+  tab: 'cameras' | 'models' = 'cameras';
   cameras: Camera[] = [];
   events: VisionEvent[] = [];
   latestByCamera: Record<string, VisionEvent> = {};
@@ -206,20 +298,35 @@ export class MonitorComponent implements OnInit, OnDestroy {
   addError = '';
   draft: NewCamera = { name: '', url: '', protocol: 'rtsp', zone: 'Zone A', device: 'CPU' };
 
+  // Models tab
+  status: VisionStatus | null = null;
+  models: GroupedModels = { detection: [], classification: [], clip: [] };
+  readonly purposeGroups: { key: ModelPurpose; label: string }[] = [
+    { key: 'detection', label: 'Detection' },
+    { key: 'classification', label: 'Classification' },
+    { key: 'clip', label: 'CLIP (Zero-shot)' },
+  ];
+  modelDraft: NewModel = { name: '', purpose: 'detection', modelPath: '', embeddingsPath: '', labelsFile: '', device: '' };
+  modelSaving = false;
+  modelError = '';
+
   private feedTick = Date.now();
   private eventSource: EventSource | null = null;
   private subs: Subscription[] = [];
   private readonly maxEvents = 100;
 
-  constructor(private cameraService: CameraService) {}
+  constructor(private cameraService: CameraService, private modelService: ModelService) {}
 
   ngOnInit(): void {
     this.loadCameras();
     this.loadRecentEvents();
     this.connectEvents();
+    this.loadModels();
+    this.loadStatus();
     // Refresh camera status + live snapshots periodically.
     this.subs.push(interval(4000).subscribe(() => this.loadCameras()));
     this.subs.push(interval(1000).subscribe(() => { this.feedTick = Date.now(); }));
+    this.subs.push(interval(10000).subscribe(() => this.loadStatus()));
   }
 
   ngOnDestroy(): void {
@@ -306,5 +413,65 @@ export class MonitorComponent implements OnInit, OnDestroy {
     if (status === 'VERIFIED') return 'st-verified';
     if (status === 'PENDING REVIEW') return 'st-pending';
     return 'st-rejected';
+  }
+
+  // --- Camera health ---
+  healthLabel(cam: Camera): string {
+    switch (cam.health) {
+      case 'detecting': return 'DETECTING';
+      case 'starting': return 'STARTING';
+      case 'simulated': return 'SIMULATED';
+      default: return 'OFFLINE';
+    }
+  }
+
+  healthClass(cam: Camera): string {
+    switch (cam.health) {
+      case 'detecting': return 'hb-detecting';
+      case 'starting': return 'hb-starting';
+      case 'simulated': return 'hb-sim';
+      default: return 'hb-off';
+    }
+  }
+
+  // --- Models tab ---
+  private loadModels(): void {
+    this.modelService.list().subscribe({
+      next: (m) => { this.models = m; },
+      error: () => {},
+    });
+  }
+
+  private loadStatus(): void {
+    this.modelService.status().subscribe({
+      next: (s) => { this.status = s; },
+      error: () => {},
+    });
+  }
+
+  addModel(): void {
+    this.modelSaving = true;
+    this.modelError = '';
+    this.modelService.add(this.modelDraft).subscribe({
+      next: () => {
+        this.modelSaving = false;
+        this.modelDraft = { name: '', purpose: this.modelDraft.purpose, modelPath: '', embeddingsPath: '', labelsFile: '', device: '' };
+        this.loadModels();
+        this.loadStatus();
+      },
+      error: (err) => {
+        this.modelSaving = false;
+        this.modelError = err?.error?.error || 'Failed to add model';
+      },
+    });
+  }
+
+  activateModel(m: VisionModel): void {
+    this.modelService.activate(m.id).subscribe(() => { this.loadModels(); this.loadStatus(); });
+  }
+
+  removeModel(m: VisionModel): void {
+    if (!confirm(`Delete model "${m.name}"?`)) return;
+    this.modelService.remove(m.id).subscribe(() => { this.loadModels(); this.loadStatus(); });
   }
 }

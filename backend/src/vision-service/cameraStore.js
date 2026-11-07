@@ -12,7 +12,10 @@ const fs = require('fs');
 const path = require('path');
 const { randomUUID } = require('crypto');
 
-const STORE_FILE = path.join(__dirname, '..', '..', 'vision-cameras.json');
+// Registry persists under DATA_DIR (a named volume in docker) so cameras survive
+// container rebuilds; defaults to the backend root for local dev.
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', '..');
+const STORE_FILE = path.join(DATA_DIR, 'vision-cameras.json');
 
 let cameras = load();
 
@@ -30,6 +33,7 @@ function load() {
 
 function persist() {
   try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
     // Persist only declarative fields; never the live runtime status.
     const safe = cameras.map(({ status, mode, lastEventAt, ...rest }) => rest);
     fs.writeFileSync(STORE_FILE, JSON.stringify(safe, null, 2), 'utf8');

@@ -29,7 +29,16 @@ function bootstrap() {
 bootstrap();
 
 function withStatus(cam) {
-  return { ...cam, ...pipeline.status(cam.id) };
+  const st = pipeline.status(cam.id);
+  return { ...cam, ...st, health: health(st) };
+}
+
+// Derive a coarse health signal so the UI can flag "launched but not detecting".
+function health(st) {
+  if (st.status === 'stopped') return 'stopped';
+  if (st.mode === 'simulated') return 'simulated';
+  if (st.lastEventAt && Date.now() - new Date(st.lastEventAt).getTime() < 30000) return 'detecting';
+  return 'starting';
 }
 
 // GET /api/cameras - list cameras with live status

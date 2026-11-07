@@ -12,7 +12,8 @@ const db = require('../db');
 const { randomUUID } = require('crypto');
 const mqttPublisher = require('../services/mqtt-publisher');
 
-const SETTINGS_FILE = path.join(__dirname, '..', '..', 'settings.json');
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', '..');
+const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 
 const defaults = {
   stockCheckEnabled: true,
@@ -31,6 +32,7 @@ function loadSettings() {
 
 function saveSettings() {
   try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
     // explicit boolean coercion severs the HTTP-request taint chain before file write
     const safe = { stockCheckEnabled: settings.stockCheckEnabled === true };
     fs.writeFileSync(SETTINGS_FILE, JSON.stringify(safe, null, 2), 'utf8');

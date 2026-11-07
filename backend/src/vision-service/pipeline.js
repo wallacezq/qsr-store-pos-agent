@@ -22,17 +22,29 @@ const path = require('path');
 const { randomUUID } = require('crypto');
 const mqttPublisher = require('../services/mqtt-publisher');
 
-const GST_BIN = process.env.VISION_GST_BIN || 'gst-launch-1.0';
+const GST_BIN = process.env.VISION_GST_BIN || 'gst-launch-1.0'; // native mode only
+const DOCKER_BIN = process.env.VISION_DOCKER_BIN || 'docker';
+const DOCKER_IMAGE = process.env.VISION_DOCKER_IMAGE || 'intel/dlstreamer:2026.3.0-ubuntu24-rc1';
+const DOCKER_NETWORK = process.env.VISION_DOCKER_NETWORK || '';
+// How to run DL Streamer: 'docker' (sibling container, default) or 'native' (gst on PATH).
+const INVOKE = (process.env.VISION_INVOKE || 'docker').toLowerCase();
 const FORCE_SIM = process.env.VISION_SIMULATE === '1';
 const DEVICE_DEFAULT = process.env.VISION_DEVICE || 'CPU';
-// OpenVINO IR model paths (see wallacezq/dlstreamer-example download_models.sh).
-const DETECT_MODEL = process.env.VISION_DETECT_MODEL || './models/yolov8n/yolov8n.xml';
-const CLIP_MODEL = process.env.VISION_CLIP_MODEL || './models/clip/clip-image-encoder.xml';
-const ZEROSHOT_EMBEDDINGS = process.env.VISION_ZEROSHOT_EMBEDDINGS || './models/clip/table-states.safetensors';
+// OpenVINO IR model paths. In docker mode these resolve INSIDE the container,
+// where VISION_MODELS_DIR is bind-mounted to /models.
+const DETECT_MODEL = process.env.VISION_DETECT_MODEL || '/models/yolov8n/yolov8n.xml';
+const CLIP_MODEL = process.env.VISION_CLIP_MODEL || '/models/clip/clip-image-encoder.xml';
+const ZEROSHOT_EMBEDDINGS = process.env.VISION_ZEROSHOT_EMBEDDINGS || '/models/clip/table-states.safetensors';
 // ROI class gvaclassify runs on (gvadetect label for a table/surface).
 const TABLE_OBJECT_CLASS = process.env.VISION_TABLE_CLASS || 'dining table';
 
-const SNAPSHOT_DIR = path.join(__dirname, 'snapshots');
+// Host dir with the OpenVINO models (bind-mounted to /models). Required to run a
+// real pipeline in docker mode; unset -> dev falls back to simulation.
+const MODELS_HOST_DIR = process.env.VISION_MODELS_DIR || '';
+// Optional host dir for annotated snapshots (bind-mounted to /snapshots).
+const SNAPSHOT_HOST_DIR = process.env.VISION_SNAPSHOT_HOST_DIR || '';
+// Path where the backend READS snapshots (same host dir mounted into the backend).
+const SNAPSHOT_DIR = process.env.VISION_SNAPSHOT_DIR || path.join(__dirname, 'snapshots');
 const TABLE_STATES = ['empty table', 'occupied table', 'dirty table'];
 
 const running = new Map(); // cameraId -> { proc?, timer?, mode, status, lastEventAt }
@@ -56,43 +68,115 @@ function mqttAddress() {
   return m ? `${m[1]}:${m[2] || '1883'}` : 'localhost:1883';
 }
 
-// Build the gst-launch argument vector. Kept as an args array (no shell) so the
-// user-supplied RTSP URL cannot inject shell tokens.
-function buildGstArgs(camera) {
-  const device = camera.device || DEVICE_DEFAULT;
-  return [
-    '-v',
-    'rtspsrc', `location=${camera.url}`, 'latency=100', 'protocols=tcp', '!',
-    'rtph264depay', '!', 'decodebin3', '!',
-    'gvadetect', `model=${DETECT_MODEL}`, `device=${device}`, 'threshold=0.3', 'inference-interval=3', '!',
-    'gvatrack', 'tracking-type=short-term-imageless', '!',
-    'gvaclassify', `model=${CLIP_MODEL}`, `zeroshot-embeddings-file=${ZEROSHOT_EMBEDDINGS}`,
-    `object-class=${TABLE_OBJECT_CLASS}`, `device=${device}`, '!',
-    'gvawatermark', '!',
-    'tee', 'name=t',
-    't.', '!', 'queue', '!', 'gvametaconvert', 'format=json', '!',
-    'gvametapublish', 'method=mqtt', `address=${mqttAddress()}`, `topic=${detectionTopic(camera.id)}`,
-    `mqtt-client-id=vision-${camera.id}`, '!', 'fakesink',
-    't.', '!', 'queue', 'max-size-buffers=1', 'leaky=downstream', '!',
-    'jpegenc', '!', 'multifilesink', `location=${snapshotPath(camera.id)}`, 'max-files=1',
-  ];
+// Resolve the models to use: prefer the active entries from the model store,
+// fall back to env defaults. Paths are as the DL Streamer runtime sees them.
+function resolveModels(camera) {
+  let modelStore = null;
+  try { modelStore = require('./modelStore'); } catch { /* optional */ }
+  const det = modelStore && modelStore.getActive('detection');
+  const clip = modelStore && modelStore.getActive('clip');
+  const cls = modelStore && modelStore.getActive('classification');
+  return {
+    detect: det?.modelPath || DETECT_MODEL,
+    clip: clip?.modelPath || CLIP_MODEL,
+    embeddings: clip?.embeddingsPath || ZEROSHOT_EMBEDDINGS,
+    classify: cls?.modelPath || null,
+    classifyLabels: cls?.labelsFile || null,
+    device: camera.device || DEVICE_DEFAULT,
+  };
 }
 
-function modelsPresent() {
-  // Treat relative sample paths as "not present" so dev defaults to simulation.
-  return [DETECT_MODEL, CLIP_MODEL, ZEROSHOT_EMBEDDINGS].every(
-    (p) => path.isAbsolute(p) && fs.existsSync(p)
-  );
+// GStreamer pipeline tokens (one arg per token). Model/snapshot paths here are
+// whatever the runtime sees: container paths in docker mode, host paths native.
+function buildGstTokens(camera, snapshotTarget) {
+  const m = resolveModels(camera);
+  const tokens = [
+    'rtspsrc', `location=${camera.url}`, 'latency=100', 'protocols=tcp', '!',
+    'rtph264depay', '!', 'decodebin3', '!',
+    'gvadetect', `model=${m.detect}`, `device=${m.device}`, 'threshold=0.3', 'inference-interval=3', '!',
+    'gvatrack', 'tracking-type=short-term-imageless', '!',
+    'gvaclassify', `model=${m.clip}`, `zeroshot-embeddings-file=${m.embeddings}`,
+    `object-class=${TABLE_OBJECT_CLASS}`, `device=${m.device}`, '!',
+  ];
+  // Optional extra classification stage when an active classification model is set.
+  if (m.classify) {
+    tokens.push('gvaclassify', `model=${m.classify}`, `device=${m.device}`);
+    if (m.classifyLabels) tokens.push(`labels-file=${m.classifyLabels}`);
+    tokens.push('!');
+  }
+  tokens.push('gvawatermark', '!');
+  const publish = [
+    'gvametaconvert', 'format=json', '!',
+    'gvametapublish', 'method=mqtt', `address=${mqttAddress()}`, `topic=${detectionTopic(camera.id)}`,
+    `mqtt-client-id=vision-${camera.id}`, '!', 'fakesink',
+  ];
+  if (snapshotTarget) {
+    tokens.push(
+      'tee', 'name=t',
+      't.', '!', 'queue', '!', ...publish,
+      't.', '!', 'queue', 'max-size-buffers=1', 'leaky=downstream', '!',
+      'jpegenc', '!', 'multifilesink', `location=${snapshotTarget}`, 'max-files=1',
+    );
+  } else {
+    tokens.push(...publish);
+  }
+  return tokens;
+}
+
+// Wrap the pipeline in `docker run <dlstreamer-image> gst-launch-1.0 ...`. The
+// gst tokens are passed positionally ("$@") so the user-supplied RTSP URL cannot
+// be re-parsed or injected by the shell.
+function buildDockerArgs(camera) {
+  const device = camera.device || DEVICE_DEFAULT;
+  const snapshotTarget = SNAPSHOT_HOST_DIR ? `/snapshots/${camera.id}.jpg` : null;
+  const gstTokens = buildGstTokens(camera, snapshotTarget);
+  const args = ['run', '--rm', '--name', `vision-${camera.id}`];
+  if (DOCKER_NETWORK) args.push('--network', DOCKER_NETWORK);
+  if (device !== 'CPU') args.push('--device', '/dev/dri'); // GPU/NPU passthrough
+  if (MODELS_HOST_DIR) args.push('-v', `${MODELS_HOST_DIR}:/models:ro`);
+  if (SNAPSHOT_HOST_DIR) args.push('-v', `${SNAPSHOT_HOST_DIR}:/snapshots`);
+  args.push(DOCKER_IMAGE, 'bash', '-c',
+    'source /opt/intel/dlstreamer/setupvars.sh 2>/dev/null; exec gst-launch-1.0 -v "$@"',
+    'gst', ...gstTokens);
+  return args;
+}
+
+// Real pipelines need models. In docker mode gate on a host models dir so dev
+// (no models) defaults to simulation; native mode trusts gst on PATH.
+function canRunReal() {
+  if (FORCE_SIM) return false;
+  if (INVOKE === 'native') return true;
+  if (!MODELS_HOST_DIR) return false;
+  return modelsAvailable();
+}
+
+// When the models mount is visible to this process (vision_models at /models),
+// require the active detection + clip models to actually exist so an empty
+// volume stays in simulation; otherwise trust the configuration.
+function modelsAvailable() {
+  const probe = process.env.VISION_MODELS_MOUNT || '/models';
+  if (!fs.existsSync(probe)) return true;
+  const m = resolveModels({});
+  return fs.existsSync(m.detect) && fs.existsSync(m.clip);
 }
 
 function startReal(camera) {
   ensureSnapshotDir();
-  const args = buildGstArgs(camera);
-  const proc = spawn(GST_BIN, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+  let bin, args;
+  if (INVOKE === 'native') {
+    bin = GST_BIN;
+    args = ['-v', ...buildGstTokens(camera, snapshotPath(camera.id))];
+  } else {
+    bin = DOCKER_BIN;
+    // Clear any stale container with the same name (best effort).
+    try { spawn(DOCKER_BIN, ['rm', '-f', `vision-${camera.id}`], { stdio: 'ignore' }); } catch { /* ignore */ }
+    args = buildDockerArgs(camera);
+  }
+  const proc = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
 
   proc.on('error', (err) => {
     // Binary missing or failed to launch — degrade to simulation.
-    console.warn(`[Vision] gst-launch failed for ${camera.id} (${err.message}); using simulation.`);
+    console.warn(`[Vision] ${INVOKE} launch failed for ${camera.id} (${err.message}); using simulation.`);
     const entry = running.get(camera.id);
     if (entry) entry.proc = null;
     startSimulated(camera);
@@ -105,7 +189,7 @@ function startReal(camera) {
   });
 
   running.set(camera.id, { proc, mode: 'live', status: 'detecting', lastEventAt: null });
-  console.log(`[Vision] started DL Streamer pipeline for ${camera.id} (${camera.name})`);
+  console.log(`[Vision] started DL Streamer pipeline for ${camera.id} via ${INVOKE} (${camera.name})`);
 }
 
 // Emit a DL-Streamer-shaped detection message so the bridge handles sim and real
@@ -147,10 +231,10 @@ function startSimulated(camera) {
 
 function start(camera) {
   if (running.has(camera.id)) stop(camera.id);
-  if (FORCE_SIM || !modelsPresent()) {
-    startSimulated(camera);
-  } else {
+  if (canRunReal()) {
     startReal(camera);
+  } else {
+    startSimulated(camera);
   }
   return status(camera.id);
 }
@@ -159,6 +243,10 @@ function stop(cameraId) {
   const entry = running.get(cameraId);
   if (!entry) return false;
   if (entry.proc) { try { entry.proc.kill('SIGTERM'); } catch { /* ignore */ } }
+  // Ensure the sibling DL Streamer container is torn down too.
+  if (entry.mode === 'live' && INVOKE === 'docker') {
+    try { spawn(DOCKER_BIN, ['rm', '-f', `vision-${cameraId}`], { stdio: 'ignore' }); } catch { /* ignore */ }
+  }
   if (entry.timer) clearInterval(entry.timer);
   running.delete(cameraId);
   return true;
@@ -179,4 +267,21 @@ function stopAll() {
   for (const id of [...running.keys()]) stop(id);
 }
 
-module.exports = { start, stop, status, markEvent, stopAll, snapshotPath, detectionTopic, TABLE_STATES };
+// Whether newly started cameras run a real DL Streamer pipeline vs simulation.
+function realEnabled() {
+  return canRunReal();
+}
+
+function config() {
+  return {
+    invoke: INVOKE,
+    image: DOCKER_IMAGE,
+    network: DOCKER_NETWORK || null,
+    device: DEVICE_DEFAULT,
+    modelsDirConfigured: !!MODELS_HOST_DIR,
+    simulate: FORCE_SIM,
+    realEnabled: canRunReal(),
+  };
+}
+
+module.exports = { start, stop, status, markEvent, stopAll, snapshotPath, detectionTopic, TABLE_STATES, realEnabled, config };

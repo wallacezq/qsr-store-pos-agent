@@ -21,6 +21,7 @@ const chatRoutes = require('./routes/chat');
 const metricsRoutes = require('./routes/metrics');
 const eventsRoutes = require('./routes/events');
 const camerasRoutes = require('./routes/cameras');
+const visionRoutes = require('./routes/vision');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -61,6 +62,7 @@ app.use('/api/chat', chatRoutes);
 app.use('/api/metrics', metricsRoutes);
 app.use('/api/events', eventsRoutes);
 app.use('/api/cameras', camerasRoutes);
+app.use('/api/vision', visionRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
