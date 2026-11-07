@@ -8,10 +8,25 @@ const express = require('express');
 const router = express.Router();
 const modelStore = require('../vision-service/modelStore');
 const pipeline = require('../vision-service/pipeline');
+const exporter = require('../vision-service/exporter');
 
 // GET /api/vision/models - models grouped by purpose
 router.get('/models', (req, res) => {
   res.json(modelStore.grouped());
+});
+
+// POST /api/vision/models/export - pull + convert an open model to OpenVINO IR
+router.post('/models/export', (req, res) => {
+  try {
+    res.status(202).json(exporter.startExport(req.body));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// GET /api/vision/models/export/jobs - export job statuses
+router.get('/models/export/jobs', (req, res) => {
+  res.json(exporter.listJobs());
 });
 
 // POST /api/vision/models - register a model

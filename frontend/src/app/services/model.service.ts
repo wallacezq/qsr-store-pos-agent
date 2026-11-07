@@ -48,6 +48,30 @@ export interface VisionStatus {
   activeModels: { detection: string | null; classification: string | null; clip: string | null };
 }
 
+export interface ExportRequest {
+  source: 'yolo' | 'huggingface' | 'clip-zeroshot';
+  model: string;
+  purpose: ModelPurpose;
+  precision: 'FP32' | 'FP16' | 'INT8';
+  name?: string;
+  task?: string;
+  labels?: string;
+}
+
+export interface ExportJob {
+  id: string;
+  source: string;
+  model: string;
+  purpose: string;
+  precision: string;
+  name: string;
+  status: 'running' | 'success' | 'failed';
+  xml: string | null;
+  error: string | null;
+  startedAt: string;
+  endedAt: string | null;
+}
+
 @Injectable({ providedIn: 'root' })
 export class ModelService {
   private apiUrl = '/api/vision';
@@ -72,5 +96,13 @@ export class ModelService {
 
   status(): Observable<VisionStatus> {
     return this.http.get<VisionStatus>(`${this.apiUrl}/status`);
+  }
+
+  export(req: ExportRequest): Observable<ExportJob> {
+    return this.http.post<ExportJob>(`${this.apiUrl}/models/export`, req);
+  }
+
+  exportJobs(): Observable<ExportJob[]> {
+    return this.http.get<ExportJob[]>(`${this.apiUrl}/models/export/jobs`);
   }
 }

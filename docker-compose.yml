@@ -357,6 +357,18 @@ services:
       - /proc:/proc:ro
       - /run:/run:ro
 
+  # Model exporter (YOLO / HuggingFace -> OpenVINO IR). Build-only, run on demand
+  # by the backend via `docker run edgemart/vision-exporter ...`. Not started by
+  # `docker compose up`. Build it with: docker compose --profile tools build vision-exporter
+  vision-exporter:
+    build:
+      context: ./exporter
+    image: edgemart/vision-exporter:latest
+    profiles: ["tools"]
+    entrypoint: ["python", "export.py"]
+    command: ["--help"]
+    restart: "no"
+
 volumes:
   postgres_data:
   mqtt_data:

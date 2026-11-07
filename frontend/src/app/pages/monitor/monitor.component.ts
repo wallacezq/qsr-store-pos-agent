@@ -9,7 +9,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { interval, Subscription } from 'rxjs';
 import { CameraService, Camera, VisionEvent, NewCamera } from '../../services/camera.service';
-import { ModelService, GroupedModels, VisionModel, NewModel, ModelPurpose, VisionStatus } from '../../services/model.service';
+import { ModelService, GroupedModels, VisionModel, NewModel, ModelPurpose, VisionStatus, ExportRequest, ExportJob } from '../../services/model.service';
 
 @Component({
   selector: 'app-monitor',
@@ -143,6 +143,55 @@ import { ModelService, GroupedModels, VisionModel, NewModel, ModelPurpose, Visio
     <!-- MODELS TAB -->
     <ng-container *ngIf="tab === 'models'">
       <section class="add-card">
+        <div class="card-head">\u2b07 Export / Convert model \u2192 OpenVINO IR</div>
+        <div class="add-grid">
+          <label>Source
+            <select [(ngModel)]="exportDraft.source">
+              <option value="yolo">YOLO (Ultralytics)</option>
+              <option value="huggingface">HuggingFace</option>
+              <option value="clip-zeroshot">CLIP (zero-shot)</option>
+            </select>
+          </label>
+          <label class="wide">Model
+            <input [(ngModel)]="exportDraft.model" [placeholder]="exportDraft.source === 'yolo' ? 'yolov8n  or  yolov8n-cls' : 'openai/clip-vit-base-patch32'">
+          </label>
+          <label *ngIf="exportDraft.source !== 'clip-zeroshot'">Purpose
+            <select [(ngModel)]="exportDraft.purpose">
+              <option value="detection">Detection</option>
+              <option value="classification">Classification</option>
+              <option value="clip">CLIP (zero-shot)</option>
+            </select>
+          </label>
+          <label *ngIf="exportDraft.source !== 'clip-zeroshot'">Precision
+            <select [(ngModel)]="exportDraft.precision">
+              <option value="FP32">FP32</option>
+              <option value="FP16">FP16</option>
+              <option value="INT8">INT8</option>
+            </select>
+          </label>
+          <label class="wide" *ngIf="exportDraft.source === 'clip-zeroshot'">Labels (comma-separated)
+            <input [(ngModel)]="exportDraft.labels" placeholder="empty table, occupied table, dirty table">
+          </label>
+          <label>Name (optional)<input [(ngModel)]="exportDraft.name" placeholder="my-detector"></label>
+        </div>
+        <div class="add-actions">
+          <span class="add-error" *ngIf="exportError">{{ exportError }}</span>
+          <button class="btn-primary" [disabled]="!exportDraft.model || exporting" (click)="submitExport()">
+            {{ exporting ? 'Starting\u2026' : 'Export to OpenVINO' }}
+          </button>
+        </div>
+        <div class="export-jobs" *ngIf="exportJobs.length">
+          <div class="ejob" *ngFor="let j of exportJobs">
+            <span class="ejob-status" [ngClass]="'ej-' + j.status">{{ j.status }}</span>
+            <span class="ejob-name">{{ j.source }} \u00b7 {{ j.model }} \u2192 {{ j.name }}</span>
+            <span class="ejob-err" *ngIf="j.error" [title]="j.error">{{ j.error }}</span>
+            <span class="ejob-time">{{ j.startedAt | date:'HH:mm:ss' }}</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="add-card">
+        <div class="card-head">\u2795 Register existing model</div>
         <div class="add-grid">
           <label>Name<input [(ngModel)]="modelDraft.name" placeholder="yolov8n"></label>
           <label>Purpose
@@ -228,6 +277,16 @@ import { ModelService, GroupedModels, VisionModel, NewModel, ModelPurpose, Visio
     .model-path.sub { opacity: .8; }
     .model-controls { display: flex; gap: 4px; flex-shrink: 0; }
     .model-empty { font-size: 12px; color: var(--text-secondary); padding: 8px; }
+    .card-head { font-size: 13px; font-weight: 700; margin-bottom: 12px; }
+    .export-jobs { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px; }
+    .ejob { display: flex; align-items: center; gap: 10px; font-size: 12px; }
+    .ejob-status { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 8px; text-transform: uppercase; }
+    .ej-running { color: #f0a020; background: rgba(240,160,32,.14); }
+    .ej-success { color: #34d399; background: rgba(52,211,153,.14); }
+    .ej-failed { color: #e5484d; background: rgba(229,72,77,.14); }
+    .ejob-name { color: var(--text-primary); }
+    .ejob-err { color: #e5484d; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ejob-time { margin-left: auto; color: var(--text-secondary); font-family: 'Roboto Mono', monospace; }
 
     .add-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 18px; }
     .add-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
@@ -310,6 +369,12 @@ export class MonitorComponent implements OnInit, OnDestroy {
   modelSaving = false;
   modelError = '';
 
+  // Export / convert to OpenVINO IR
+  exportDraft: ExportRequest = { source: 'yolo', model: '', purpose: 'detection', precision: 'FP32', name: '' };
+  exporting = false;
+  exportError = '';
+  exportJobs: ExportJob[] = [];
+
   private feedTick = Date.now();
   private eventSource: EventSource | null = null;
   private subs: Subscription[] = [];
@@ -323,10 +388,12 @@ export class MonitorComponent implements OnInit, OnDestroy {
     this.connectEvents();
     this.loadModels();
     this.loadStatus();
+    this.loadExportJobs();
     // Refresh camera status + live snapshots periodically.
     this.subs.push(interval(4000).subscribe(() => this.loadCameras()));
     this.subs.push(interval(1000).subscribe(() => { this.feedTick = Date.now(); }));
     this.subs.push(interval(10000).subscribe(() => this.loadStatus()));
+    this.subs.push(interval(4000).subscribe(() => this.loadExportJobs()));
   }
 
   ngOnDestroy(): void {
@@ -473,5 +540,33 @@ export class MonitorComponent implements OnInit, OnDestroy {
   removeModel(m: VisionModel): void {
     if (!confirm(`Delete model "${m.name}"?`)) return;
     this.modelService.remove(m.id).subscribe(() => { this.loadModels(); this.loadStatus(); });
+  }
+
+  // --- Export / convert ---
+  private loadExportJobs(): void {
+    this.modelService.exportJobs().subscribe({
+      next: (jobs) => {
+        const anyDone = jobs.some((j) => j.status === 'success') && this.exportJobs.some((p) => p.status === 'running');
+        this.exportJobs = jobs;
+        if (anyDone) this.loadModels(); // a finished export auto-registers a model
+      },
+      error: () => {},
+    });
+  }
+
+  submitExport(): void {
+    this.exporting = true;
+    this.exportError = '';
+    this.modelService.export(this.exportDraft).subscribe({
+      next: () => {
+        this.exporting = false;
+        this.exportDraft = { ...this.exportDraft, model: '', name: '' };
+        this.loadExportJobs();
+      },
+      error: (err) => {
+        this.exporting = false;
+        this.exportError = err?.error?.error || 'Failed to start export';
+      },
+    });
   }
 }
