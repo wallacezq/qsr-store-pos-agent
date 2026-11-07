@@ -11,6 +11,7 @@ import { TransactionsComponent } from './pages/transactions/transactions.compone
 import { SimulatorComponent } from './pages/simulator/simulator.component';
 import { ConfigComponent } from './pages/config/config.component';
 import { ChatComponent } from './pages/chat/chat.component';
+import { MonitorComponent } from './pages/monitor/monitor.component';
 
 export const routes: Routes = [
   { path: '', redirectTo: 'dashboard', pathMatch: 'full' },
@@ -18,6 +19,7 @@ export const routes: Routes = [
   { path: 'pos', component: PosComponent },
   { path: 'transactions', component: TransactionsComponent },
   { path: 'simulator', component: SimulatorComponent },
+  { path: 'monitor', component: MonitorComponent },
   { path: 'chat', component: ChatComponent },
   { path: 'config', component: ConfigComponent }
 ];

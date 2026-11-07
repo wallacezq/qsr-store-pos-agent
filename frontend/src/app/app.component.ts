@@ -51,6 +51,9 @@ import { MetricsPanelComponent } from './components/metrics-panel/metrics-panel.
         <button mat-button routerLink="/simulator" routerLinkActive="active-link">
           <mat-icon>sports_esports</mat-icon> Simulator
         </button>
+        <button mat-button routerLink="/monitor" routerLinkActive="active-link">
+          <mat-icon>videocam</mat-icon> Live Monitor
+        </button>
         <button mat-button routerLink="/chat" routerLinkActive="active-link">
           <mat-icon>smart_toy</mat-icon> Agent
         </button>

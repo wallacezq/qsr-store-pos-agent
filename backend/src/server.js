@@ -20,6 +20,7 @@ const mcpRoutes = require('./routes/mcp');
 const chatRoutes = require('./routes/chat');
 const metricsRoutes = require('./routes/metrics');
 const eventsRoutes = require('./routes/events');
+const camerasRoutes = require('./routes/cameras');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -59,6 +60,7 @@ app.use('/api/mcp', mcpRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/metrics', metricsRoutes);
 app.use('/api/events', eventsRoutes);
+app.use('/api/cameras', camerasRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
