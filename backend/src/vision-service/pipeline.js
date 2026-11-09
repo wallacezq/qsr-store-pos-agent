@@ -76,14 +76,24 @@ function resolveModels(camera) {
   const det = modelStore && modelStore.getActive('detection');
   const clip = modelStore && modelStore.getActive('clip');
   const cls = modelStore && modelStore.getActive('classification');
+  const embeddings = clip?.embeddingsPath || ZEROSHOT_EMBEDDINGS;
   return {
     detect: det?.modelPath || DETECT_MODEL,
     clip: clip?.modelPath || CLIP_MODEL,
-    embeddings: clip?.embeddingsPath || ZEROSHOT_EMBEDDINGS,
+    embeddings,
+    clipLabels: clip?.labelsFile || zeroshotLabelsFor(embeddings),
     classify: cls?.modelPath || null,
     classifyLabels: cls?.labelsFile || null,
     device: camera.device || DEVICE_DEFAULT,
   };
+}
+
+// The exporter writes labels.txt beside the embeddings; gvaclassify needs it to
+// map zero-shot scores back to class names.
+function zeroshotLabelsFor(embeddingsPath) {
+  if (!embeddingsPath) return null;
+  const guess = path.join(path.dirname(embeddingsPath), 'labels.txt');
+  try { return fs.existsSync(guess) ? guess : null; } catch { return null; }
 }
 
 // GStreamer pipeline tokens (one arg per token). Model/snapshot paths here are
@@ -96,8 +106,11 @@ function buildGstTokens(camera, snapshotTarget) {
     'gvadetect', `model=${m.detect}`, `device=${m.device}`, 'threshold=0.3', 'inference-interval=3', '!',
     'gvatrack', 'tracking-type=short-term-imageless', '!',
     'gvaclassify', `model=${m.clip}`, `zeroshot-embeddings-file=${m.embeddings}`,
-    `object-class=${TABLE_OBJECT_CLASS}`, `device=${m.device}`, '!',
   ];
+  if (m.clipLabels) tokens.push(`labels-file=${m.clipLabels}`);
+  tokens.push(
+    'zeroshot-topk=1', `object-class=${TABLE_OBJECT_CLASS}`, `device=${m.device}`, '!',
+  );
   // Optional extra classification stage when an active classification model is set.
   if (m.classify) {
     tokens.push('gvaclassify', `model=${m.classify}`, `device=${m.device}`);
