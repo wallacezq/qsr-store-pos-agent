@@ -15,14 +15,35 @@ import shutil
 import subprocess
 import sys
 
+import openvino as ov
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DOWNLOAD_MODELS_DIR = os.path.join(SCRIPT_DIR, "download_models")
 DEFAULT_CLIP_LABELS = ["empty table", "occupied table", "dirty table"]
 
 
 def _first_xml(root):
-    hits = glob.glob(os.path.join(root, "**", "*.xml"), recursive=True)
+    hits = sorted(glob.glob(os.path.join(root, "**", "*.xml"), recursive=True))
     return hits[0] if hits else None
+
+
+def _model_type(xml):
+    """Return the model_info/model_type rt_info of an OpenVINO IR, or None."""
+    try:
+        model = ov.Core().read_model(xml)
+        return str(model.get_rt_info(["model_info", "model_type"]))
+    except Exception:  # noqa: BLE001 - missing rt_info / unreadable IR
+        return None
+
+
+def _find_clip_zeroshot_xml(root):
+    """Pick the IR tagged model_type=clip_zeroshot; the converter is selected by
+    this tag, so an untagged IR causes gvaclassify 'post-processing is NULL'."""
+    hits = sorted(glob.glob(os.path.join(root, "**", "*.xml"), recursive=True))
+    for xml in hits:
+        if _model_type(xml) == "clip_zeroshot":
+            return xml
+    return None
 
 
 def export_yolo(model_id, out_dir, precision):
@@ -70,7 +91,12 @@ def export_clip_zeroshot(model_id, out_dir, labels):
         sys.executable, os.path.join(DOWNLOAD_MODELS_DIR, "download_hf_models.py"),
         "--model", model_id, "--outdir", out_dir, "--export-variant", "clip-zeroshot",
     ])
-    xml = _first_xml(out_dir)
+    xml = _find_clip_zeroshot_xml(out_dir)
+    if not xml:
+        raise RuntimeError(
+            "export produced no IR tagged model_type=clip_zeroshot; gvaclassify needs "
+            "this tag (ensure the exporter's DL Streamer scripts match the runtime)."
+        )
 
     # 2) Text-label embeddings (.safetensors) aligned to the same CLIP model.
     labels_path = os.path.join(out_dir, "labels.txt")

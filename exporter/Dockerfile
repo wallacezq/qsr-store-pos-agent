@@ -16,8 +16,11 @@ FROM python:3.11-slim
 ENV PIP_NO_CACHE_DIR=1 \
     PYTHONUNBUFFERED=1
 
-# DL Streamer ref to pull the HF/CLIP export helpers from.
-ARG DLS_REF=main
+# DL Streamer ref to pull the HF/CLIP export helpers from. Pin to the SAME
+# release as the runtime image (VISION_DOCKER_IMAGE) so the exported model's
+# rt_info matches the converter that consumes it. A mismatch yields a model the
+# runtime can't post-process ("post-processing is NULL").
+ARG DLS_REF=v2026.3.0-rc1
 
 # git for the sparse checkout; OpenCV/torch runtime libs for ultralytics.
 RUN apt-get update && apt-get install -y --no-install-recommends \

@@ -368,6 +368,9 @@ services:
   vision-exporter:
     build:
       context: ./exporter
+      args:
+        # Keep the export scripts in sync with the DL Streamer runtime version.
+        DLS_REF: ${VISION_DLS_REF:-v2026.3.0-rc1}
     image: edgemart/vision-exporter:latest
     profiles: ["tools"]
     entrypoint: ["python", "export.py"]
