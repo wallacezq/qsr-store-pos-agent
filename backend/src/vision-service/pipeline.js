@@ -174,6 +174,12 @@ function startReal(camera) {
   }
   const proc = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
 
+  // Capture pipeline output so a failed/exited pipeline reports why.
+  let tail = '';
+  const capture = (buf) => { tail = (tail + buf.toString()).slice(-4000); };
+  proc.stdout.on('data', capture);
+  proc.stderr.on('data', capture);
+
   proc.on('error', (err) => {
     // Binary missing or failed to launch — degrade to simulation.
     console.warn(`[Vision] ${INVOKE} launch failed for ${camera.id} (${err.message}); using simulation.`);
@@ -184,11 +190,15 @@ function startReal(camera) {
 
   proc.on('exit', (code) => {
     console.log(`[Vision] pipeline for ${camera.id} exited (code=${code})`);
+    if (code && tail.trim()) console.warn(`[Vision] ${camera.id} output tail:\n${tail.trim()}`);
     const entry = running.get(camera.id);
-    if (entry && entry.proc === proc) entry.status = 'stopped';
+    if (entry && entry.proc === proc) {
+      entry.status = 'stopped';
+      entry.lastError = tail.trim().split('\n').filter(Boolean).slice(-2).join(' ').slice(-400) || `exited with code ${code}`;
+    }
   });
 
-  running.set(camera.id, { proc, mode: 'live', status: 'detecting', lastEventAt: null });
+  running.set(camera.id, { proc, mode: 'live', status: 'detecting', lastEventAt: null, lastError: null });
   console.log(`[Vision] started DL Streamer pipeline for ${camera.id} via ${INVOKE} (${camera.name})`);
 }
 
@@ -256,8 +266,8 @@ function stop(cameraId) {
 
 function status(cameraId) {
   const entry = running.get(cameraId);
-  if (!entry) return { status: 'stopped', mode: null, lastEventAt: null };
-  return { status: entry.status, mode: entry.mode, lastEventAt: entry.lastEventAt };
+  if (!entry) return { status: 'stopped', mode: null, lastEventAt: null, lastError: null };
+  return { status: entry.status, mode: entry.mode, lastEventAt: entry.lastEventAt, lastError: entry.lastError || null };
 }
 
 function markEvent(cameraId) {
