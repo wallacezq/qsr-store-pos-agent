@@ -53,6 +53,12 @@ import { ModelService, GroupedModels, VisionModel, NewModel, ModelPurpose, Visio
           <input [(ngModel)]="draft.url" placeholder="rtsp://user:pass@192.168.1.10:554/stream">
         </label>
         <label>Zone<input [(ngModel)]="draft.zone" placeholder="Zone A"></label>
+        <label>Route events to
+          <select [(ngModel)]="draft.experience">
+            <option value="cafe">Café</option>
+            <option value="grocery">Grocery</option>
+          </select>
+        </label>
         <label>Inference Device
           <select [(ngModel)]="draft.device">
             <option value="CPU">CPU</option>
