@@ -131,6 +131,8 @@ function buildDockerArgs(camera) {
   const snapshotTarget = SNAPSHOT_HOST_DIR ? `/snapshots/${camera.id}.jpg` : null;
   const gstTokens = buildGstTokens(camera, snapshotTarget);
   const args = ['run', '--rm', '--name', `vision-${camera.id}`];
+  // Let the pipeline reach an RTSP server running on the Docker host.
+  args.push('--add-host', 'host.docker.internal:host-gateway');
   if (DOCKER_NETWORK) args.push('--network', DOCKER_NETWORK);
   if (device !== 'CPU') args.push('--device', '/dev/dri'); // GPU/NPU passthrough
   if (MODELS_HOST_DIR) args.push('-v', `${MODELS_HOST_DIR}:/models:ro`);
@@ -172,6 +174,7 @@ function startReal(camera) {
     try { spawn(DOCKER_BIN, ['rm', '-f', `vision-${camera.id}`], { stdio: 'ignore' }); } catch { /* ignore */ }
     args = buildDockerArgs(camera);
   }
+  console.log(`[Vision] launching ${camera.id}: ${bin} ${args.join(' ')}`);
   const proc = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
 
   // Capture pipeline output so a failed/exited pipeline reports why.
