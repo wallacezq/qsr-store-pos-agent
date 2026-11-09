@@ -15,7 +15,7 @@ import shutil
 import subprocess
 import sys
 
-import openvino as ov
+import defusedxml.ElementTree as ET
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DOWNLOAD_MODELS_DIR = os.path.join(SCRIPT_DIR, "download_models")
@@ -28,11 +28,11 @@ def _first_xml(root):
 
 
 def _model_type(xml):
-    """Return the model_info/model_type rt_info of an OpenVINO IR, or None."""
+    """Read model_info/model_type from an OpenVINO IR's rt_info section, or None."""
     try:
-        model = ov.Core().read_model(xml)
-        return str(model.get_rt_info(["model_info", "model_type"]))
-    except Exception:  # noqa: BLE001 - missing rt_info / unreadable IR
+        node = ET.parse(xml).getroot().find("rt_info/model_info/model_type")
+        return node.get("value") if node is not None else None
+    except Exception:  # noqa: BLE001 - unreadable/!IR XML
         return None
 
 
