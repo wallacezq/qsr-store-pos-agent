@@ -97,6 +97,10 @@ import { ModelService, GroupedModels, VisionModel, NewModel, ModelPurpose, Visio
         <div class="feed-foot">
           <span class="feed-url" [title]="cam.url">{{ cam.url }}</span>
           <div class="feed-controls">
+            <select class="route-select" [ngModel]="cam.experience" (ngModelChange)="setExperience(cam, $event)" title="Route events to">
+              <option value="cafe">☕ Café</option>
+              <option value="grocery">🛒 Grocery</option>
+            </select>
             <button class="icon-btn" *ngIf="cam.status !== 'detecting'" (click)="start(cam)" title="Start">▶</button>
             <button class="icon-btn" *ngIf="cam.status === 'detecting'" (click)="stop(cam)" title="Stop">⏸</button>
             <button class="icon-btn danger" (click)="remove(cam)" title="Remove">🗑</button>
@@ -324,7 +328,8 @@ import { ModelService, GroupedModels, VisionModel, NewModel, ModelPurpose, Visio
     .feed-zone { position: absolute; bottom: 8px; right: 8px; font-size: 10px; color: #cbd5e1; background: rgba(0,0,0,.5); padding: 2px 8px; border-radius: 6px; }
     .feed-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; }
     .feed-url { font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .feed-controls { display: flex; gap: 4px; flex-shrink: 0; }
+    .feed-controls { display: flex; gap: 4px; flex-shrink: 0; align-items: center; }
+    .route-select { background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-primary); border-radius: 6px; height: 28px; font-size: 11px; padding: 0 4px; }
     .icon-btn { background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-primary); border-radius: 6px; width: 28px; height: 28px; cursor: pointer; font-size: 12px; }
     .icon-btn.danger:hover { border-color: #e5484d; color: #e5484d; }
     .feeds-empty { grid-column: 1 / -1; text-align: center; color: var(--text-secondary); padding: 32px; border: 1px dashed var(--border); border-radius: 12px; }
@@ -472,6 +477,10 @@ export class MonitorComponent implements OnInit, OnDestroy {
   remove(cam: Camera): void {
     if (!confirm(`Remove camera "${cam.name}"?`)) return;
     this.cameraService.remove(cam.id).subscribe(() => this.loadCameras());
+  }
+
+  setExperience(cam: Camera, experience: 'cafe' | 'grocery'): void {
+    this.cameraService.update(cam.id, { experience }).subscribe(() => this.loadCameras());
   }
 
   feedUrl(cam: Camera): string {

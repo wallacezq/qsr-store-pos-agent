@@ -60,6 +60,10 @@ export class CameraService {
     return this.http.post<Camera>(this.apiUrl, camera);
   }
 
+  update(id: string, patch: Partial<Camera>): Observable<Camera> {
+    return this.http.put<Camera>(`${this.apiUrl}/${id}`, patch);
+  }
+
   remove(id: string): Observable<{ success: boolean }> {
     return this.http.delete<{ success: boolean }>(`${this.apiUrl}/${id}`);
   }
