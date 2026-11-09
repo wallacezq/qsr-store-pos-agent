@@ -360,7 +360,7 @@ export class MonitorComponent implements OnInit, OnDestroy {
   showAdd = false;
   saving = false;
   addError = '';
-  draft: NewCamera = { name: '', url: '', protocol: 'rtsp', zone: 'Zone A', device: 'CPU' };
+  draft: NewCamera = { name: '', url: '', protocol: 'rtsp', zone: 'Zone A', device: 'CPU', experience: 'cafe' };
 
   // Models tab
   status: VisionStatus | null = null;
@@ -445,7 +445,7 @@ export class MonitorComponent implements OnInit, OnDestroy {
       next: () => {
         this.saving = false;
         this.showAdd = false;
-        this.draft = { name: '', url: '', protocol: 'rtsp', zone: 'Zone A', device: 'CPU' };
+        this.draft = { name: '', url: '', protocol: 'rtsp', zone: 'Zone A', device: 'CPU', experience: 'cafe' };
         this.loadCameras();
       },
       error: (err) => {

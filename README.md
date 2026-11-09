@@ -1,6 +1,6 @@
 # EdgeMart
 
-A complete Point-of-Sale system with dual experiences (**Grocery** and **Café**), 3D floor simulators, an MCP server for agentic LLM integration, and an **Agent Chat** powered by [Hermes Gateway](https://github.com/nousresearch/hermes-agent) with real-time table tracking via MQTT.
+A complete Point-of-Sale system with dual experiences (**Grocery** and **Café**), 3D floor simulators, an **Operation Insights** dashboard, an AI **Live Monitor** (RTSP/ONVIF cameras + Intel DL Streamer vision), an MCP server for agentic LLM integration, and an **Agent Chat** powered by [Hermes Gateway](https://github.com/nousresearch/hermes-agent) with real-time table tracking via MQTT.
 
 ## Experiences
 
@@ -21,8 +21,10 @@ Switch between experiences from the toolbar toggle. Each experience has its own 
 - Angular framework with Material Design
 - Dark/Standard theme switching
 - Experience switcher (Grocery / Café)
+- **Operation Insights** dashboard (default landing page) — live KPIs, revenue trend, table status, inventory, and a **Workflow Engine Events** MQTT feed
+- **Live Monitor** tab — RTSP/ONVIF cameras + AI vision ([docs](docs/LIVE-MONITOR.md))
 - Integrated simulator snap-on option
-- Configuration page for MCP server management
+- Configuration page for MCP server management (plus stock check / replenish stock)
 - **Agent Chat** tab for agentic AI interaction
 
 ### Backend (RESTful API)
@@ -51,6 +53,13 @@ Switch between experiences from the toolbar toggle. Each experience has its own 
 - Sidebar showing connection status, available tools, and live table grid
 - Hermes Gateway connects to multiple MCP servers (POS, table-status, external vision AI)
 - Simulator generates synthetic vision events when external hardware is unavailable
+
+### Live Monitor (AI Vision)
+- Add any number of **RTSP / ONVIF** cameras
+- Per-camera Intel DL Streamer pipeline: detection + **zero-shot CLIP** classification of empty / occupied / dirty tables
+- Detections publish to MQTT and feed the table-status service, dashboard, and agent
+- Model manager (Detection / Classification / CLIP) + **model exporter** (YOLO, HuggingFace, CLIP zero-shot → OpenVINO IR)
+- 📖 [Full Live Monitor documentation →](docs/LIVE-MONITOR.md)
 
 ## Architecture
 
@@ -459,6 +468,18 @@ These events are POSTed to `POST /api/chat/tables/event` and feed into the Table
 
 ---
 
+## Live Monitor (AI Vision)
+
+Connect RTSP/ONVIF cameras and run Intel DL Streamer pipelines (object detection + zero-shot CLIP
+classification) to detect **empty / occupied / dirty tables** and emit events to MQTT — feeding the
+Operation Insights dashboard, the agent, and the table-status service. Add/manage any number of cameras,
+manage OpenVINO models grouped by purpose, and export/convert open models (YOLO, HuggingFace, CLIP zero-shot)
+to OpenVINO IR from the UI.
+
+📖 **[Full Live Monitor documentation →](docs/LIVE-MONITOR.md)**
+
+---
+
 ## Docker Deployment
 
 Run the entire stack (frontend, backend, PostgreSQL, MQTT, GPU metrics) in containers with a single command.
@@ -483,6 +504,26 @@ docker compose up --build
 | `qmmd` | pos-qmmd | 9101 | Intel GPU metrics (Prometheus endpoint) |
 
 Open http://localhost after startup.
+
+### Live Monitor / Vision (Docker)
+
+The AI **Live Monitor** launches Intel DL Streamer pipelines (and the model exporter) as **sibling
+containers** via the Docker socket, which the `backend` service mounts (and runs as `user: root` to
+access). Two named volumes hold vision data:
+
+| Volume | Purpose |
+|--------|---------|
+| `vision_models` | OpenVINO model files, shared with the pipeline/exporter containers |
+| `vision_data` | Camera/model/settings registry JSON (survives rebuilds) |
+
+The `vision-exporter` service is **build-only** (profile `tools`) — it is not started by `docker compose up`.
+Build it on demand:
+
+```bash
+docker compose --profile tools build vision-exporter
+```
+
+See [docs/LIVE-MONITOR.md](docs/LIVE-MONITOR.md) for the full setup, models, and troubleshooting.
 
 ### Docker Compose Environment
 
@@ -620,5 +661,7 @@ curl http://localhost:9101/metrics
 | `HERMES_GATEWAY_URL` | `http://localhost:3001` | Hermes agent gateway URL |
 | `QMMD_URL` | `http://qmmd:9101` | qmmd GPU metrics endpoint |
 | `PORT` | `3000` | Backend API port |
+
+> **Live Monitor / vision** variables (`VISION_*`, `DATA_DIR`) are documented in [docs/LIVE-MONITOR.md](docs/LIVE-MONITOR.md).
 
 Or toggle the MCP server from the **Config** tab in the UI.

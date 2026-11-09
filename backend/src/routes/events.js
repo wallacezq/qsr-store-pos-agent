@@ -7,9 +7,10 @@
 const express = require('express');
 const router = express.Router();
 
-// Mirror only what the Agent tab's table-status service observes: the café
-// simulator / vision events on the cafe/* topics (cafe/vision|pos|staff/events).
-const TOPIC_FILTERS = ['cafe/#'];
+// Mirror what the Agent tab's table-status service observes (cafe/* topics) plus
+// grocery-routed camera vision events, so the dashboard shows Live Monitor events
+// for whichever experience a camera is assigned to.
+const TOPIC_FILTERS = ['cafe/#', 'grocery/vision/events'];
 const RING_SIZE = 100;
 
 let client = null;
@@ -37,7 +38,7 @@ function normalize(topic, payload) {
       topic,
       eventType: `table.${payload.event}`,
       severity: payload.event === 'dirty' ? 'warning' : 'info',
-      experience: 'cafe',
+      experience: payload.experience || 'cafe',
       source: payload.source || 'vision',
       ref: payload.tableId,
       occurredAt: payload.timestamp || new Date().toISOString(),

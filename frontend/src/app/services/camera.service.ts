@@ -15,6 +15,7 @@ export interface Camera {
   protocol: 'rtsp' | 'onvif';
   zone: string;
   device: 'CPU' | 'GPU' | 'NPU';
+  experience: 'cafe' | 'grocery';
   enabled: boolean;
   status?: 'detecting' | 'stopped';
   mode?: 'live' | 'simulated' | null;
@@ -42,6 +43,7 @@ export interface NewCamera {
   protocol: 'rtsp' | 'onvif';
   zone: string;
   device: 'CPU' | 'GPU' | 'NPU';
+  experience: 'cafe' | 'grocery';
 }
 
 @Injectable({ providedIn: 'root' })

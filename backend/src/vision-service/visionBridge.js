@@ -103,12 +103,14 @@ class VisionBridge extends EventEmitter {
     const tableId = `table-${zone}-${trackId}`.replace(/\s+/g, '').toLowerCase();
     const confidence = this._confidence(obj);
     const occurredAt = payload?.timestamp ? new Date(payload.timestamp).toISOString() : new Date().toISOString();
+    const experience = camera.experience || 'cafe';
 
     const event = {
       eventId: `EV-${String(10000 + (this._seq++)).slice(-5)}`,
       cameraId,
       cameraName: camera.name || cameraId,
       zone,
+      experience,
       tableId,
       trackId,
       eventType: mapped.eventType,
@@ -123,13 +125,14 @@ class VisionBridge extends EventEmitter {
     this.emit('event', event);
     pipeline.markEvent(cameraId);
 
-    // Feed the existing table-status pipeline (cafe/vision/events expects
-    // { tableId, event, source, timestamp }).
-    mqttPublisher.publish('cafe/vision/events', {
+    // Route to the chosen experience's vision topic; cafe also feeds the
+    // table-status service (which subscribes to cafe/vision/events).
+    mqttPublisher.publish(`${experience}/vision/events`, {
       tableId,
       event: mapped.tableEvent,
       source: `camera:${camera.name || cameraId}`,
       timestamp: occurredAt,
+      experience,
       metadata: { zone, confidence, cameraId },
     });
   }

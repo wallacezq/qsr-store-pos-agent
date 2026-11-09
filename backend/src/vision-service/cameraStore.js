@@ -44,16 +44,20 @@ function persist() {
 
 const PROTOCOLS = ['rtsp', 'onvif'];
 const DEVICES = ['CPU', 'GPU', 'NPU'];
+const EXPERIENCES = ['cafe', 'grocery'];
 
 function sanitize(input = {}) {
   const protocol = PROTOCOLS.includes(input.protocol) ? input.protocol : 'rtsp';
   const device = DEVICES.includes(input.device) ? input.device : 'CPU';
+  const experience = EXPERIENCES.includes(input.experience) ? input.experience : 'cafe';
   return {
     name: String(input.name || 'Camera').slice(0, 80),
     url: String(input.url || '').slice(0, 500),
     protocol,
     zone: String(input.zone || 'Zone A').slice(0, 60),
     device,
+    // Which experience's dashboard these events route to.
+    experience,
     enabled: input.enabled !== false,
   };
 }
@@ -92,4 +96,4 @@ function remove(id) {
   return true;
 }
 
-module.exports = { list, get, add, update, remove, PROTOCOLS, DEVICES };
+module.exports = { list, get, add, update, remove, PROTOCOLS, DEVICES, EXPERIENCES };
