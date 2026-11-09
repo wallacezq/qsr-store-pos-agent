@@ -16,6 +16,8 @@ const EXPORTER_IMAGE = process.env.VISION_EXPORTER_IMAGE || 'edgemart/vision-exp
 // Named volume (or host path) that both the exporter and the DL Streamer
 // containers mount at /models.
 const MODELS_VOLUME = process.env.VISION_MODELS_DIR || 'vision_models';
+// HuggingFace token for authenticated (higher rate-limit) downloads.
+const HF_TOKEN = process.env.HF_TOKEN || process.env.VISION_HF_TOKEN || '';
 const SOURCES = ['yolo', 'huggingface', 'clip-zeroshot'];
 
 const jobs = new Map(); // id -> job
@@ -58,10 +60,14 @@ function startExport(input = {}) {
   };
   jobs.set(id, job);
 
-  const args = [
-    'run', '--rm', '-v', `${MODELS_VOLUME}:/models`, EXPORTER_IMAGE,
+  const args = ['run', '--rm', '-v', `${MODELS_VOLUME}:/models`];
+  // Pass the HF token so huggingface_hub / optimum / the DL Streamer scripts
+  // authenticate and get the higher download rate limit.
+  if (HF_TOKEN) args.push('-e', `HF_TOKEN=${HF_TOKEN}`);
+  args.push(
+    EXPORTER_IMAGE,
     '--source', source, '--model', model, '--out', outContainer, '--precision', job.precision,
-  ];
+  );
   if (input.task) args.push('--task', String(input.task));
   if (source === 'clip-zeroshot' && input.labels) args.push('--labels', String(input.labels));
 

@@ -197,7 +197,9 @@ function startReal(camera) {
 function emitSimDetection(camera) {
   const state = TABLE_STATES[Math.floor(Math.random() * TABLE_STATES.length)];
   const confidence = 0.55 + Math.random() * 0.4;
-  const trackId = 1 + Math.floor(Math.random() * 6);
+  // Pin simulated detections to track/table 0 so they don't pollute the real
+  // (e.g. café 15-table) set with extra per-track tables.
+  const trackId = 0;
   const message = {
     timestamp: Date.now(),
     source: camera.url,

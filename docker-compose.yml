@@ -50,6 +50,8 @@ services:
       VISION_DOCKER_IMAGE: ${VISION_DOCKER_IMAGE:-intel/dlstreamer:2026.3.0-ubuntu24-rc1}
       VISION_DOCKER_NETWORK: edgemart-net
       VISION_DEVICE: ${VISION_DEVICE:-CPU}
+      # HuggingFace token for authenticated model-exporter downloads (higher rate limit).
+      HF_TOKEN: ${HF_TOKEN:-}
       # Model files live on the vision_models volume (also mounted into the DL
       # Streamer container). Real pipelines start only once models are present.
       VISION_MODELS_DIR: ${VISION_MODELS_DIR:-vision_models}
