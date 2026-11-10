@@ -17,7 +17,21 @@ const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 
 const defaults = {
   stockCheckEnabled: true,
+  // Agent (LLM) latency controls, tunable from the Config tab.
+  agentMaxTokens: parseInt(process.env.CHAT_MAX_TOKENS || '768', 10),
+  agentTemperature: parseFloat(process.env.CHAT_TEMPERATURE || '0.2'),
+  agentHistoryLimit: parseInt(process.env.CHAT_HISTORY_LIMIT || '8', 10),
 };
+
+function clampInt(v, min, max, fallback) {
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
+}
+
+function clampFloat(v, min, max, fallback) {
+  const n = parseFloat(v);
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
+}
 
 function loadSettings() {
   try {
@@ -33,8 +47,13 @@ function loadSettings() {
 function saveSettings() {
   try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
-    // explicit boolean coercion severs the HTTP-request taint chain before file write
-    const safe = { stockCheckEnabled: settings.stockCheckEnabled === true };
+    // Explicit coercion/clamping severs the HTTP-request taint chain before file write.
+    const safe = {
+      stockCheckEnabled: settings.stockCheckEnabled === true,
+      agentMaxTokens: clampInt(settings.agentMaxTokens, 64, 8192, defaults.agentMaxTokens),
+      agentTemperature: clampFloat(settings.agentTemperature, 0, 2, defaults.agentTemperature),
+      agentHistoryLimit: clampInt(settings.agentHistoryLimit, 0, 50, defaults.agentHistoryLimit),
+    };
     fs.writeFileSync(SETTINGS_FILE, JSON.stringify(safe, null, 2), 'utf8');
   } catch (err) {
     console.error('Failed to save settings file:', err.message);
@@ -50,10 +69,13 @@ router.get('/', (req, res) => {
 
 // PUT update settings
 router.put('/', (req, res) => {
-  const { stockCheckEnabled } = req.body;
+  const { stockCheckEnabled, agentMaxTokens, agentTemperature, agentHistoryLimit } = req.body;
   if (typeof stockCheckEnabled === 'boolean') {
     settings.stockCheckEnabled = stockCheckEnabled;
   }
+  if (agentMaxTokens !== undefined) settings.agentMaxTokens = clampInt(agentMaxTokens, 64, 8192, settings.agentMaxTokens);
+  if (agentTemperature !== undefined) settings.agentTemperature = clampFloat(agentTemperature, 0, 2, settings.agentTemperature);
+  if (agentHistoryLimit !== undefined) settings.agentHistoryLimit = clampInt(agentHistoryLimit, 0, 50, settings.agentHistoryLimit);
   saveSettings();
   res.json(settings);
 });

@@ -14,6 +14,28 @@ const HERMES_GATEWAY_URL = process.env.HERMES_GATEWAY_URL || 'http://localhost:3
 const HERMES_API_KEY = process.env.HERMES_API_KEY || 'change-me-local-dev';
 // Max time to wait for the Hermes gateway to finish streaming before aborting.
 const CHAT_TIMEOUT_MS = parseInt(process.env.CHAT_TIMEOUT_MS || '90000', 10);
+// Latency controls: cap the output length, keep sampling tight, and only send
+// the most recent turns so prefill cost stays bounded as the chat grows.
+const CHAT_MAX_TOKENS = parseInt(process.env.CHAT_MAX_TOKENS || '768', 10);
+const CHAT_TEMPERATURE = parseFloat(process.env.CHAT_TEMPERATURE || '0.2');
+const CHAT_HISTORY_LIMIT = parseInt(process.env.CHAT_HISTORY_LIMIT || '8', 10);
+
+// Keep only the last N prior turns; older context mostly inflates prefill time.
+function trimHistory(history, limit) {
+  const n = Number.isFinite(limit) ? limit : CHAT_HISTORY_LIMIT;
+  return Array.isArray(history) ? history.slice(-n) : [];
+}
+
+// Live agent params from the settings store (Config tab), else env defaults.
+const settingsRoute = require('./settings');
+function agentParams() {
+  const s = (typeof settingsRoute.getSettings === 'function' && settingsRoute.getSettings()) || {};
+  return {
+    maxTokens: Number.isFinite(s.agentMaxTokens) ? s.agentMaxTokens : CHAT_MAX_TOKENS,
+    temperature: Number.isFinite(s.agentTemperature) ? s.agentTemperature : CHAT_TEMPERATURE,
+    historyLimit: Number.isFinite(s.agentHistoryLimit) ? s.agentHistoryLimit : CHAT_HISTORY_LIMIT,
+  };
+}
 
 const SYSTEM_PROMPT = `You are an intelligent café operations assistant for EdgeMart Café.
 
@@ -106,10 +128,12 @@ router.post('/', async (req, res) => {
             role: 'system',
             content: SYSTEM_PROMPT
           },
-          ...(context?.history || []),
+          ...trimHistory(context?.history),
           { role: 'user', content: message.trim() }
         ],
         stream: true,
+        max_tokens: CHAT_MAX_TOKENS,
+        temperature: CHAT_TEMPERATURE,
         conversation_id: conversationId || undefined,
         ...buildModelFields({ model, provider, modelOptions }),
       }),
@@ -220,6 +244,7 @@ router.post('/message', async (req, res) => {
   }
 
   try {
+    const ap = agentParams();
     const response = await fetch(`${HERMES_GATEWAY_URL}/v1/chat/completions`, {
       method: 'POST',
       headers: {
@@ -232,10 +257,12 @@ router.post('/message', async (req, res) => {
             role: 'system',
             content: SYSTEM_PROMPT
           },
-          ...(context?.history || []),
+          ...trimHistory(context?.history, ap.historyLimit),
           { role: 'user', content: message.trim() }
         ],
         stream: false,
+        max_tokens: ap.maxTokens,
+        temperature: ap.temperature,
         conversation_id: conversationId || undefined,
       }),
     });

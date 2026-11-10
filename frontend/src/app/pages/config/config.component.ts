@@ -6,6 +6,7 @@
 
 import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { MatCardModule } from '@angular/material/card';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
@@ -19,7 +20,7 @@ import { SettingsService, Settings } from '../../services/settings.service';
 @Component({
   selector: 'app-config',
   standalone: true,
-  imports: [CommonModule, MatCardModule, MatButtonModule, MatIconModule, MatSlideToggleModule, MatSnackBarModule, MatChipsModule],
+  imports: [CommonModule, FormsModule, MatCardModule, MatButtonModule, MatIconModule, MatSlideToggleModule, MatSnackBarModule, MatChipsModule],
   template: `
     <div class="config-container">
       <h2><mat-icon>settings</mat-icon> Configuration</h2>
@@ -145,6 +146,39 @@ import { SettingsService, Settings } from '../../services/settings.service';
         </mat-card-content>
       </mat-card>
 
+      <!-- Agent (LLM) Settings -->
+      <mat-card class="config-card">
+        <mat-card-header>
+          <mat-icon mat-card-avatar class="section-icon">tune</mat-icon>
+          <mat-card-title>Agent (LLM) Settings</mat-card-title>
+          <mat-card-subtitle>Latency vs. quality controls for the Hermes → OVMS (Qwen3.5-9B, GPU) agent</mat-card-subtitle>
+        </mat-card-header>
+        <mat-card-content>
+          <div class="agent-grid">
+            <label class="agent-field">
+              <span class="setting-label">Max response tokens</span>
+              <span class="setting-desc">Caps answer length. Lower = faster. (64–8192)</span>
+              <input type="number" min="64" max="8192" step="64" [(ngModel)]="settings.agentMaxTokens">
+            </label>
+            <label class="agent-field">
+              <span class="setting-label">Temperature</span>
+              <span class="setting-desc">Lower = more deterministic & slightly faster. (0–2)</span>
+              <input type="number" min="0" max="2" step="0.1" [(ngModel)]="settings.agentTemperature">
+            </label>
+            <label class="agent-field">
+              <span class="setting-label">History turns</span>
+              <span class="setting-desc">Prior messages sent each turn. Lower = faster prefill. (0–50)</span>
+              <input type="number" min="0" max="50" step="1" [(ngModel)]="settings.agentHistoryLimit">
+            </label>
+          </div>
+          <div class="agent-actions">
+            <button mat-raised-button color="primary" (click)="saveAgentSettings()">
+              <mat-icon>save</mat-icon> Save agent settings
+            </button>
+          </div>
+        </mat-card-content>
+      </mat-card>
+
       <!-- Data Management -->
       <mat-card class="config-card">
         <mat-card-header>
@@ -181,6 +215,31 @@ import { SettingsService, Settings } from '../../services/settings.service';
     .config-card {
       margin-bottom: 24px;
     }
+    .agent-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+    }
+    .agent-field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .agent-field input {
+      margin-top: 4px;
+      padding: 8px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--bg-secondary, #fff);
+      color: var(--text-primary);
+      font-size: 14px;
+    }
+    .agent-actions {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 16px;
+    }
+    @media (max-width: 700px) { .agent-grid { grid-template-columns: 1fr; } }
     .section-icon {
       background: var(--accent);
       color: white;
@@ -340,7 +399,7 @@ export class ConfigComponent implements OnInit, OnDestroy {
   };
   mcpConfig: any = null;
   isCafe = false;
-  settings: Settings = { stockCheckEnabled: true };
+  settings: Settings = { stockCheckEnabled: true, agentMaxTokens: 768, agentTemperature: 0.2, agentHistoryLimit: 8 };
   private pollInterval: any;
 
   posTools = [
@@ -471,6 +530,18 @@ export class ConfigComponent implements OnInit, OnDestroy {
       error: () => {
         this.snackBar.open('Failed to update setting', 'OK', { duration: 3000 });
       }
+    });
+  }
+
+  saveAgentSettings(): void {
+    const patch = {
+      agentMaxTokens: Number(this.settings.agentMaxTokens),
+      agentTemperature: Number(this.settings.agentTemperature),
+      agentHistoryLimit: Number(this.settings.agentHistoryLimit),
+    };
+    this.settingsService.updateSettings(patch).subscribe({
+      next: (s) => { this.settings = s; this.snackBar.open('Agent settings saved', 'OK', { duration: 3000 }); },
+      error: () => this.snackBar.open('Failed to save agent settings', 'OK', { duration: 3000 }),
     });
   }
 

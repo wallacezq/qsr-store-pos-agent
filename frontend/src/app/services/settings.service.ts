@@ -10,6 +10,9 @@ import { Observable } from 'rxjs';
 
 export interface Settings {
   stockCheckEnabled: boolean;
+  agentMaxTokens?: number;
+  agentTemperature?: number;
+  agentHistoryLimit?: number;
 }
 
 @Injectable({ providedIn: 'root' })
