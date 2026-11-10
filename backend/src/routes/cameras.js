@@ -37,7 +37,9 @@ function withStatus(cam) {
 function health(st) {
   if (st.status === 'stopped') return 'stopped';
   if (st.mode === 'simulated') return 'simulated';
-  if (st.lastEventAt && Date.now() - new Date(st.lastEventAt).getTime() < 30000) return 'detecting';
+  const eventFresh = st.lastEventAt && Date.now() - new Date(st.lastEventAt).getTime() < 30000;
+  const frameFresh = st.lastFrameAt && Date.now() - st.lastFrameAt < 15000;
+  if (eventFresh || frameFresh) return 'detecting';
   return 'starting';
 }
 

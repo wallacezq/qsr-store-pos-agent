@@ -348,8 +348,20 @@ function stop(cameraId) {
 
 function status(cameraId) {
   const entry = running.get(cameraId);
-  if (!entry) return { status: 'stopped', mode: null, lastEventAt: null, lastError: null, classify: null };
-  return { status: entry.status, mode: entry.mode, lastEventAt: entry.lastEventAt, lastError: entry.lastError || null, classify: entry.classify ?? null };
+  if (!entry) return { status: 'stopped', mode: null, lastEventAt: null, lastError: null, classify: null, lastFrameAt: null };
+  return {
+    status: entry.status,
+    mode: entry.mode,
+    lastEventAt: entry.lastEventAt,
+    lastError: entry.lastError || null,
+    classify: entry.classify ?? null,
+    // mtime (ms) of the latest preview frame — proves the pipeline is streaming.
+    lastFrameAt: entry.mode === 'live' ? (snapshotMtime(cameraId) || null) : null,
+  };
+}
+
+function snapshotMtime(cameraId) {
+  try { return fs.statSync(snapshotPath(cameraId)).mtimeMs; } catch { return 0; }
 }
 
 function markEvent(cameraId) {

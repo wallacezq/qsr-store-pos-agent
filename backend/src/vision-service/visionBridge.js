@@ -70,6 +70,9 @@ class VisionBridge extends EventEmitter {
     } catch {
       return;
     }
+    // Any output from the pipeline means it's live (covers detect-only, where
+    // objects carry no empty/occupied/dirty label to map below).
+    pipeline.markEvent(cameraId);
     const objects = Array.isArray(payload?.objects) ? payload.objects : [];
     for (const obj of objects) {
       const label = this._extractLabel(obj);
@@ -123,7 +126,6 @@ class VisionBridge extends EventEmitter {
 
     this._push(event);
     this.emit('event', event);
-    pipeline.markEvent(cameraId);
 
     // Route to the chosen experience's vision topic; cafe also feeds the
     // table-status service (which subscribes to cafe/vision/events).
