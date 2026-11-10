@@ -14,6 +14,7 @@ export interface VisionModel {
   id: string;
   name: string;
   purpose: ModelPurpose;
+  precision?: string;
   modelPath: string;
   embeddingsPath?: string;
   labelsFile?: string;
@@ -31,6 +32,7 @@ export interface GroupedModels {
 export interface NewModel {
   name: string;
   purpose: ModelPurpose;
+  precision?: 'FP32' | 'FP16' | 'INT8' | '';
   modelPath: string;
   embeddingsPath?: string;
   labelsFile?: string;

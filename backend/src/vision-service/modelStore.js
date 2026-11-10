@@ -16,6 +16,7 @@ const { randomUUID } = require('crypto');
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', '..');
 const STORE_FILE = path.join(DATA_DIR, 'vision-models.json');
 const PURPOSES = ['detection', 'classification', 'clip'];
+const PRECISIONS = ['FP32', 'FP16', 'INT8'];
 
 let models = load();
 
@@ -42,9 +43,12 @@ function persist() {
 
 function sanitize(input = {}) {
   const purpose = PURPOSES.includes(input.purpose) ? input.purpose : 'detection';
+  const precision = PRECISIONS.includes(input.precision) ? input.precision : '';
   return {
     name: String(input.name || 'model').slice(0, 80),
     purpose,
+    // Quantization/precision the IR was exported at (distinguishes same-source models).
+    precision,
     // Paths are as seen by the DL Streamer runtime (container paths in docker mode).
     modelPath: String(input.modelPath || '').slice(0, 500),
     embeddingsPath: String(input.embeddingsPath || '').slice(0, 500), // clip zero-shot .safetensors
@@ -65,6 +69,10 @@ function grouped() {
 
 function getActive(purpose) {
   return models.find((m) => m.purpose === purpose && m.active) || null;
+}
+
+function getById(id) {
+  return models.find((m) => m.id === id) || null;
 }
 
 function add(input) {
@@ -99,4 +107,4 @@ function remove(id) {
   return true;
 }
 
-module.exports = { list, grouped, getActive, add, activate, remove, PURPOSES };
+module.exports = { list, grouped, getActive, getById, add, activate, remove, PURPOSES };

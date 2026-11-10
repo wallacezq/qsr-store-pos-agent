@@ -101,9 +101,46 @@ import { ModelService, GroupedModels, VisionModel, NewModel, ModelPurpose, Visio
               <option value="cafe">☕ Café</option>
               <option value="grocery">🛒 Grocery</option>
             </select>
+            <button class="icon-btn" [class.on]="editingCam === cam.id" (click)="toggleCamConfig(cam)" title="Model & device">⚙</button>
             <button class="icon-btn" *ngIf="cam.status !== 'detecting'" (click)="start(cam)" title="Start">▶</button>
             <button class="icon-btn" *ngIf="cam.status === 'detecting'" (click)="stop(cam)" title="Stop">⏸</button>
             <button class="icon-btn danger" (click)="remove(cam)" title="Remove">🗑</button>
+          </div>
+        </div>
+
+        <!-- Per-camera model + device override -->
+        <div class="cam-config" *ngIf="editingCam === cam.id && camDraft">
+          <div class="cc-grid">
+            <label>Inference Device
+              <select [(ngModel)]="camDraft.device">
+                <option value="CPU">CPU</option>
+                <option value="GPU">GPU</option>
+                <option value="NPU">NPU</option>
+              </select>
+            </label>
+            <label>Detection model
+              <select [(ngModel)]="camDraft.detectionModelId">
+                <option value="">Active default</option>
+                <option *ngFor="let m of models.detection" [value]="m.id">{{ modelLabel(m) }}</option>
+              </select>
+            </label>
+            <label>CLIP model
+              <select [(ngModel)]="camDraft.clipModelId">
+                <option value="">Active default</option>
+                <option *ngFor="let m of models.clip" [value]="m.id">{{ modelLabel(m) }}</option>
+              </select>
+            </label>
+            <label>Classification model
+              <select [(ngModel)]="camDraft.classificationModelId">
+                <option value="">None / active</option>
+                <option *ngFor="let m of models.classification" [value]="m.id">{{ modelLabel(m) }}</option>
+              </select>
+            </label>
+          </div>
+          <div class="cc-actions">
+            <span class="cc-note">Saving restarts the pipeline to apply changes.</span>
+            <button class="btn-ghost" (click)="closeCamConfig()">Cancel</button>
+            <button class="btn-primary" (click)="saveCamConfig(cam)">Save</button>
           </div>
         </div>
       </div>
@@ -214,6 +251,14 @@ import { ModelService, GroupedModels, VisionModel, NewModel, ModelPurpose, Visio
               <option value="clip">CLIP (zero-shot)</option>
             </select>
           </label>
+          <label>Precision
+            <select [(ngModel)]="modelDraft.precision">
+              <option value="">(unspecified)</option>
+              <option value="FP32">FP32</option>
+              <option value="FP16">FP16</option>
+              <option value="INT8">INT8</option>
+            </select>
+          </label>
           <label class="wide">Model path (.xml)<input [(ngModel)]="modelDraft.modelPath" placeholder="/models/yolov8n/yolov8n.xml"></label>
           <label class="wide" *ngIf="modelDraft.purpose === 'clip'">Embeddings (.safetensors)<input [(ngModel)]="modelDraft.embeddingsPath" placeholder="/models/clip/table-states.safetensors"></label>
           <label *ngIf="modelDraft.purpose === 'classification'">Labels file<input [(ngModel)]="modelDraft.labelsFile" placeholder="/models/labels.txt"></label>
@@ -239,7 +284,10 @@ import { ModelService, GroupedModels, VisionModel, NewModel, ModelPurpose, Visio
         <div class="model-list">
           <div class="model-row" *ngFor="let m of models[g.key]" [class.active]="m.active">
             <div class="model-info">
-              <span class="model-name">{{ m.name }} <span class="active-pill" *ngIf="m.active">ACTIVE</span></span>
+              <span class="model-name">{{ m.name }}
+                <span class="prec-pill" *ngIf="m.precision">{{ m.precision }}</span>
+                <span class="active-pill" *ngIf="m.active">ACTIVE</span>
+              </span>
               <span class="model-path">{{ m.modelPath }}</span>
               <span class="model-path sub" *ngIf="m.embeddingsPath">⟐ {{ m.embeddingsPath }}</span>
               <span class="model-path sub" *ngIf="m.labelsFile">🟐 {{ m.labelsFile }}</span>
@@ -333,6 +381,15 @@ import { ModelService, GroupedModels, VisionModel, NewModel, ModelPurpose, Visio
     .icon-btn { background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-primary); border-radius: 6px; width: 28px; height: 28px; cursor: pointer; font-size: 12px; }
     .icon-btn.danger:hover { border-color: #e5484d; color: #e5484d; }
     .feeds-empty { grid-column: 1 / -1; text-align: center; color: var(--text-secondary); padding: 32px; border: 1px dashed var(--border); border-radius: 12px; }
+    .icon-btn.on { border-color: var(--accent); color: var(--accent); }
+    .prec-pill { font-size: 9px; font-weight: 700; color: #a78bfa; background: rgba(167,139,250,.14); border-radius: 8px; padding: 1px 6px; }
+    .cam-config { border-top: 1px solid var(--border); padding: 12px; display: flex; flex-direction: column; gap: 10px; background: var(--bg-secondary); }
+    .cc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .cc-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--text-secondary); }
+    .cc-grid select { background: var(--bg-card); border: 1px solid var(--border); color: var(--text-primary); border-radius: 6px; padding: 6px; font-size: 12px; }
+    .cc-actions { display: flex; align-items: center; gap: 10px; justify-content: flex-end; }
+    .cc-note { margin-right: auto; font-size: 10px; color: var(--text-secondary); }
+    .btn-ghost { background: var(--bg-card); border: 1px solid var(--border); color: var(--text-primary); border-radius: 8px; padding: 7px 12px; font-size: 12px; cursor: pointer; }
 
     .event-stream { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
     .es-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
@@ -368,6 +425,10 @@ export class MonitorComponent implements OnInit, OnDestroy {
   failed = new Set<string>();
   statusFilter = '';
 
+  // Per-camera model/device override editor.
+  editingCam: string | null = null;
+  camDraft: { device: Camera['device']; detectionModelId: string; clipModelId: string; classificationModelId: string } | null = null;
+
   showAdd = false;
   saving = false;
   addError = '';
@@ -381,7 +442,7 @@ export class MonitorComponent implements OnInit, OnDestroy {
     { key: 'classification', label: 'Classification' },
     { key: 'clip', label: 'CLIP (Zero-shot)' },
   ];
-  modelDraft: NewModel = { name: '', purpose: 'detection', modelPath: '', embeddingsPath: '', labelsFile: '', device: '' };
+  modelDraft: NewModel = { name: '', purpose: 'detection', precision: '', modelPath: '', embeddingsPath: '', labelsFile: '', device: '' };
   modelSaving = false;
   modelError = '';
 
@@ -483,6 +544,34 @@ export class MonitorComponent implements OnInit, OnDestroy {
     this.cameraService.update(cam.id, { experience }).subscribe(() => this.loadCameras());
   }
 
+  toggleCamConfig(cam: Camera): void {
+    if (this.editingCam === cam.id) { this.closeCamConfig(); return; }
+    this.editingCam = cam.id;
+    this.camDraft = {
+      device: cam.device,
+      detectionModelId: cam.detectionModelId || '',
+      clipModelId: cam.clipModelId || '',
+      classificationModelId: cam.classificationModelId || '',
+    };
+  }
+
+  closeCamConfig(): void {
+    this.editingCam = null;
+    this.camDraft = null;
+  }
+
+  saveCamConfig(cam: Camera): void {
+    if (!this.camDraft) return;
+    this.cameraService.update(cam.id, { ...this.camDraft }).subscribe(() => {
+      this.closeCamConfig();
+      this.loadCameras();
+    });
+  }
+
+  modelLabel(m: VisionModel): string {
+    return m.precision ? `${m.name} · ${m.precision}` : m.name;
+  }
+
   feedUrl(cam: Camera): string {
     return `${this.cameraService.snapshotUrl(cam.id)}?t=${this.feedTick}`;
   }
@@ -542,7 +631,7 @@ export class MonitorComponent implements OnInit, OnDestroy {
     this.modelService.add(this.modelDraft).subscribe({
       next: () => {
         this.modelSaving = false;
-        this.modelDraft = { name: '', purpose: this.modelDraft.purpose, modelPath: '', embeddingsPath: '', labelsFile: '', device: '' };
+        this.modelDraft = { name: '', purpose: this.modelDraft.purpose, precision: this.modelDraft.precision, modelPath: '', embeddingsPath: '', labelsFile: '', device: '' };
         this.loadModels();
         this.loadStatus();
       },

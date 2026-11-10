@@ -16,6 +16,9 @@ export interface Camera {
   zone: string;
   device: 'CPU' | 'GPU' | 'NPU';
   experience: 'cafe' | 'grocery';
+  detectionModelId?: string;
+  clipModelId?: string;
+  classificationModelId?: string;
   enabled: boolean;
   status?: 'detecting' | 'stopped';
   mode?: 'live' | 'simulated' | null;

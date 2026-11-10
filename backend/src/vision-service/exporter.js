@@ -98,6 +98,7 @@ function startExport(input = {}) {
         const registered = modelStore.add({
           name: job.name,
           purpose: job.purpose,
+          precision: job.precision,
           modelPath: job.xml,
           embeddingsPath: job.embeddings || '',
           device: '',

@@ -58,6 +58,10 @@ function sanitize(input = {}) {
     device,
     // Which experience's dashboard these events route to.
     experience,
+    // Optional per-camera model overrides (ids from the model store); empty = use active.
+    detectionModelId: String(input.detectionModelId || '').slice(0, 64),
+    clipModelId: String(input.clipModelId || '').slice(0, 64),
+    classificationModelId: String(input.classificationModelId || '').slice(0, 64),
     enabled: input.enabled !== false,
   };
 }

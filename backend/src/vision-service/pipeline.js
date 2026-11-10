@@ -73,9 +73,12 @@ function mqttAddress() {
 function resolveModels(camera) {
   let modelStore = null;
   try { modelStore = require('./modelStore'); } catch { /* optional */ }
-  const det = modelStore && modelStore.getActive('detection');
-  const clip = modelStore && modelStore.getActive('clip');
-  const cls = modelStore && modelStore.getActive('classification');
+  // Per-camera override by id, else the active model for that purpose.
+  const pick = (id, purpose) =>
+    (id && modelStore && modelStore.getById(id)) || (modelStore && modelStore.getActive(purpose)) || null;
+  const det = pick(camera.detectionModelId, 'detection');
+  const clip = pick(camera.clipModelId, 'clip');
+  const cls = pick(camera.classificationModelId, 'classification');
   const embeddings = clip?.embeddingsPath || ZEROSHOT_EMBEDDINGS;
   return {
     detect: det?.modelPath || DETECT_MODEL,
