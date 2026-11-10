@@ -30,6 +30,9 @@ const DOCKER_NETWORK = process.env.VISION_DOCKER_NETWORK || '';
 const INVOKE = (process.env.VISION_INVOKE || 'docker').toLowerCase();
 const FORCE_SIM = process.env.VISION_SIMULATE === '1';
 const DEVICE_DEFAULT = process.env.VISION_DEVICE || 'CPU';
+// Classification stage policy: 'auto' (include CLIP when its files exist),
+// 'on' (always include), 'off' (detection-only — boxes but no empty/occupied/dirty).
+const CLASSIFY_MODE = (process.env.VISION_CLASSIFY || 'auto').toLowerCase();
 // Intel NPU accel node, passed through for NPU pipelines (GPU uses /dev/dri only).
 const NPU_DEVICE = process.env.VISION_NPU_DEVICE || '/dev/accel/accel0';
 // Host GID that owns /dev/dri/renderD128; a GPU/NPU pipeline's non-root user needs
@@ -64,7 +67,11 @@ const TABLE_STATES = ['empty table', 'occupied table', 'dirty table'];
 const running = new Map(); // cameraId -> { proc?, timer?, mode, status, lastEventAt }
 
 function ensureSnapshotDir() {
-  try { fs.mkdirSync(SNAPSHOT_DIR, { recursive: true }); } catch { /* ignore */ }
+  try {
+    fs.mkdirSync(SNAPSHOT_DIR, { recursive: true });
+    // The sibling vision container writes here as a non-root user.
+    fs.chmodSync(SNAPSHOT_DIR, 0o777);
+  } catch { /* ignore */ }
 }
 
 function snapshotPath(cameraId) {
@@ -115,24 +122,26 @@ function zeroshotLabelsFor(embeddingsPath) {
 
 // GStreamer pipeline tokens (one arg per token). Model/snapshot paths here are
 // whatever the runtime sees: container paths in docker mode, host paths native.
-function buildGstTokens(camera, snapshotTarget) {
+// classify=false drops the CLIP/classification stages (detection-only) so the
+// preview still works when CLIP can't initialize.
+function buildGstTokens(camera, snapshotTarget, classify = true) {
   const m = resolveModels(camera);
   const tokens = [
     'rtspsrc', `location=${camera.url}`, 'latency=100', 'protocols=tcp', '!',
     'rtph264depay', '!', 'decodebin3', '!',
     'gvadetect', `model=${m.detect}`, `device=${m.device}`, 'threshold=0.3', 'inference-interval=3', '!',
     'gvatrack', 'tracking-type=short-term-imageless', '!',
-    'gvaclassify', `model=${m.clip}`, `zeroshot-embeddings-file=${m.embeddings}`,
   ];
-  if (m.clipLabels) tokens.push(`labels-file=${m.clipLabels}`);
-  tokens.push(
-    'zeroshot-topk=1', `object-class=${TABLE_OBJECT_CLASS}`, `device=${m.device}`, '!',
-  );
-  // Optional extra classification stage when an active classification model is set.
-  if (m.classify) {
-    tokens.push('gvaclassify', `model=${m.classify}`, `device=${m.device}`);
-    if (m.classifyLabels) tokens.push(`labels-file=${m.classifyLabels}`);
-    tokens.push('!');
+  if (classify) {
+    tokens.push('gvaclassify', `model=${m.clip}`, `zeroshot-embeddings-file=${m.embeddings}`);
+    if (m.clipLabels) tokens.push(`labels-file=${m.clipLabels}`);
+    tokens.push('zeroshot-topk=1', `object-class=${TABLE_OBJECT_CLASS}`, `device=${m.device}`, '!');
+    // Optional extra classification stage when an active classification model is set.
+    if (m.classify) {
+      tokens.push('gvaclassify', `model=${m.classify}`, `device=${m.device}`);
+      if (m.classifyLabels) tokens.push(`labels-file=${m.classifyLabels}`);
+      tokens.push('!');
+    }
   }
   tokens.push('gvawatermark', '!');
   const publish = [
@@ -141,11 +150,14 @@ function buildGstTokens(camera, snapshotTarget) {
     `mqtt-client-id=vision-${camera.id}`, '!', 'fakesink',
   ];
   if (snapshotTarget) {
+    // gvawatermark has already drawn detection boxes + classification labels on
+    // the frame; grab it at ~2 fps (the UI polls ~1 fps) as the live preview.
     tokens.push(
       'tee', 'name=t',
       't.', '!', 'queue', '!', ...publish,
       't.', '!', 'queue', 'max-size-buffers=1', 'leaky=downstream', '!',
-      'jpegenc', '!', 'multifilesink', `location=${snapshotTarget}`, 'max-files=1',
+      'videorate', '!', 'video/x-raw,framerate=2/1', '!',
+      'videoconvert', '!', 'jpegenc', '!', 'multifilesink', `location=${snapshotTarget}`, 'max-files=1',
     );
   } else {
     tokens.push(...publish);
@@ -156,10 +168,10 @@ function buildGstTokens(camera, snapshotTarget) {
 // Wrap the pipeline in `docker run <dlstreamer-image> gst-launch-1.0 ...`. The
 // gst tokens are passed positionally ("$@") so the user-supplied RTSP URL cannot
 // be re-parsed or injected by the shell.
-function buildDockerArgs(camera) {
+function buildDockerArgs(camera, classify = true) {
   const device = camera.device || DEVICE_DEFAULT;
   const snapshotTarget = SNAPSHOT_HOST_DIR ? `/snapshots/${camera.id}.jpg` : null;
-  const gstTokens = buildGstTokens(camera, snapshotTarget);
+  const gstTokens = buildGstTokens(camera, snapshotTarget, classify);
   const args = ['run', '--rm', '--name', `vision-${camera.id}`];
   // Let the pipeline reach an RTSP server running on the Docker host.
   args.push('--add-host', 'host.docker.internal:host-gateway');
@@ -189,28 +201,53 @@ function canRunReal() {
 }
 
 // When the models mount is visible to this process (vision_models at /models),
-// require the active detection + clip models to actually exist so an empty
-// volume stays in simulation; otherwise trust the configuration.
+// require the active detection model to exist so an empty volume stays in
+// simulation. CLIP is optional (the classify stage is gated separately).
 function modelsAvailable() {
   const probe = process.env.VISION_MODELS_MOUNT || '/models';
   if (!fs.existsSync(probe)) return true;
   const m = resolveModels({});
-  return fs.existsSync(m.detect) && fs.existsSync(m.clip);
+  return fs.existsSync(m.detect);
 }
 
-function startReal(camera) {
+// Whether the CLIP model + embeddings for this camera exist (so the classify
+// stage can be included). When the mount isn't visible (native) we trust config.
+function clipFilesPresent(camera) {
+  const m = resolveModels(camera);
+  if (!m.clip || !m.embeddings) return false;
+  const probe = process.env.VISION_MODELS_MOUNT || '/models';
+  if (!fs.existsSync(probe)) return true;
+  try { return fs.existsSync(m.clip) && fs.existsSync(m.embeddings); } catch { return false; }
+}
+
+// Decide whether to run the CLIP classification stage for this launch.
+function wantClassify(camera, override) {
+  if (override === false) return false;      // forced detection-only (fallback)
+  if (CLASSIFY_MODE === 'off') return false;
+  if (CLASSIFY_MODE === 'on') return true;
+  return clipFilesPresent(camera);           // 'auto'
+}
+
+// A failed CLIP init aborts the whole pipeline; detect it so we can relaunch
+// detection-only and keep the live preview + detection boxes working.
+function isClassifyError(tail) {
+  return /gvaclassify|post-processing is NULL|clip|embeddings/i.test(tail || '');
+}
+
+function startReal(camera, opts = {}) {
   ensureSnapshotDir();
+  const classify = wantClassify(camera, opts.classify);
   let bin, args;
   if (INVOKE === 'native') {
     bin = GST_BIN;
-    args = ['-v', ...buildGstTokens(camera, snapshotPath(camera.id))];
+    args = ['-v', ...buildGstTokens(camera, snapshotPath(camera.id), classify)];
   } else {
     bin = DOCKER_BIN;
     // Clear any stale container with the same name (best effort).
     try { spawn(DOCKER_BIN, ['rm', '-f', `vision-${camera.id}`], { stdio: 'ignore' }); } catch { /* ignore */ }
-    args = buildDockerArgs(camera);
+    args = buildDockerArgs(camera, classify);
   }
-  console.log(`[Vision] launching ${camera.id}: ${bin} ${args.join(' ')}`);
+  console.log(`[Vision] launching ${camera.id} (classify=${classify}): ${bin} ${args.join(' ')}`);
   const proc = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
 
   // Capture pipeline output so a failed/exited pipeline reports why.
@@ -231,13 +268,19 @@ function startReal(camera) {
     console.log(`[Vision] pipeline for ${camera.id} exited (code=${code})`);
     if (code && tail.trim()) console.warn(`[Vision] ${camera.id} output tail:\n${tail.trim()}`);
     const entry = running.get(camera.id);
-    if (entry && entry.proc === proc) {
-      entry.status = 'stopped';
-      entry.lastError = tail.trim().split('\n').filter(Boolean).slice(-2).join(' ').slice(-400) || `exited with code ${code}`;
+    if (!entry || entry.proc !== proc) return;
+    // If CLIP classification crashed the pipeline, relaunch detection-only once
+    // so the live preview + detection boxes keep working.
+    if (code && classify && !opts.retried && isClassifyError(tail)) {
+      console.warn(`[Vision] ${camera.id} classification failed; retrying detection-only.`);
+      startReal(camera, { classify: false, retried: true });
+      return;
     }
+    entry.status = 'stopped';
+    entry.lastError = tail.trim().split('\n').filter(Boolean).slice(-2).join(' ').slice(-400) || `exited with code ${code}`;
   });
 
-  running.set(camera.id, { proc, mode: 'live', status: 'detecting', lastEventAt: null, lastError: null });
+  running.set(camera.id, { proc, mode: 'live', status: 'detecting', classify, lastEventAt: null, lastError: null });
   console.log(`[Vision] started DL Streamer pipeline for ${camera.id} via ${INVOKE} (${camera.name})`);
 }
 
@@ -305,8 +348,8 @@ function stop(cameraId) {
 
 function status(cameraId) {
   const entry = running.get(cameraId);
-  if (!entry) return { status: 'stopped', mode: null, lastEventAt: null, lastError: null };
-  return { status: entry.status, mode: entry.mode, lastEventAt: entry.lastEventAt, lastError: entry.lastError || null };
+  if (!entry) return { status: 'stopped', mode: null, lastEventAt: null, lastError: null, classify: null };
+  return { status: entry.status, mode: entry.mode, lastEventAt: entry.lastEventAt, lastError: entry.lastError || null, classify: entry.classify ?? null };
 }
 
 function markEvent(cameraId) {

@@ -80,7 +80,11 @@ import { ModelService, GroupedModels, VisionModel, NewModel, ModelPurpose, Visio
       <div class="feed-card" *ngFor="let cam of cameras">
         <div class="feed-top">
           <span class="feed-name">📹 {{ cam.name }}</span>
-          <span class="feed-badge" [ngClass]="healthClass(cam)">{{ healthLabel(cam) }}</span>
+          <span class="feed-badges">
+            <span class="feed-badge detect-only" *ngIf="cam.mode === 'live' && cam.classify === false"
+                  title="CLIP classification unavailable — showing detection boxes only">DETECT-ONLY</span>
+            <span class="feed-badge" [ngClass]="healthClass(cam)">{{ healthLabel(cam) }}</span>
+          </span>
         </div>
         <div class="feed-view">
           <img *ngIf="!failed.has(cam.id)" [src]="feedUrl(cam)" (error)="onImgError(cam.id)" alt="feed">
@@ -365,6 +369,8 @@ import { ModelService, GroupedModels, VisionModel, NewModel, ModelPurpose, Visio
     .feed-name { font-size: 13px; font-weight: 600; }
     .feed-badge { font-size: 10px; font-weight: 700; letter-spacing: .4px; color: var(--text-secondary); border: 1px solid var(--border); border-radius: 10px; padding: 2px 8px; }
     .feed-badge.detecting { color: #34d399; border-color: rgba(52,211,153,.4); }
+    .feed-badges { display: flex; gap: 6px; align-items: center; }
+    .feed-badge.detect-only { color: #a78bfa; border-color: rgba(167,139,250,.4); }
     .feed-view { position: relative; aspect-ratio: 16 / 9; background: #05070d; display: flex; align-items: center; justify-content: center; overflow: hidden; }
     .feed-view img { width: 100%; height: 100%; object-fit: cover; }
     .feed-placeholder { display: flex; flex-direction: column; align-items: center; gap: 6px; color: #5b6a85; }

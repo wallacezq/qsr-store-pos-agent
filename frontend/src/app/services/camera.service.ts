@@ -22,6 +22,7 @@ export interface Camera {
   enabled: boolean;
   status?: 'detecting' | 'stopped';
   mode?: 'live' | 'simulated' | null;
+  classify?: boolean | null;
   health?: 'detecting' | 'starting' | 'simulated' | 'stopped';
   lastEventAt?: string | null;
 }
