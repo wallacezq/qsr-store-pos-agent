@@ -46,6 +46,22 @@ def _find_clip_zeroshot_xml(root):
     return None
 
 
+def _make_world_readable(root):
+    """Widen perms on exported files. The exporter runs as root but the DL Streamer
+    runtime reads models as a non-root user, and safetensors save_file writes 0600,
+    which the runtime reports as the file not existing."""
+    for dirpath, _dirnames, filenames in os.walk(root):
+        try:
+            os.chmod(dirpath, 0o755)
+        except OSError:
+            pass
+        for name in filenames:
+            try:
+                os.chmod(os.path.join(dirpath, name), 0o644)
+            except OSError:
+                pass
+
+
 def export_yolo(model_id, out_dir, precision):
     """Ultralytics: YOLO(...).export(format='openvino')."""
     from ultralytics import YOLO
@@ -136,6 +152,8 @@ def main():
     if not xml:
         print("ERROR: no .xml produced", file=sys.stderr)
         sys.exit(2)
+
+    _make_world_readable(args.out)
 
     print(f"EXPORT_RESULT xml={xml}")
     if embeddings:
