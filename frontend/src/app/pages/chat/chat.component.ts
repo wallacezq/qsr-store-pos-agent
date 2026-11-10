@@ -113,10 +113,11 @@ import { ChatService, ChatMessage, ChatStatus, ModelOption } from '../../service
               <div class="message-text" [innerHTML]="formatMessage(msg.content)"></div>
               <!-- Tool call indicators -->
               <div *ngIf="msg.toolCalls?.length" class="tool-calls">
-                <div *ngFor="let tc of msg.toolCalls" class="tool-call-chip">
+                <div *ngFor="let tc of msg.toolCalls" class="tool-call-chip" [class.pending]="!tc.result">
                   <mat-icon>build_circle</mat-icon>
                   <span class="tool-name">{{ tc.name }}</span>
                   <span class="tool-result" *ngIf="tc.result">✓</span>
+                  <span class="tool-pending" *ngIf="!tc.result">calling…</span>
                 </div>
               </div>
               <!-- Throughput metrics -->
@@ -349,6 +350,9 @@ import { ChatService, ChatMessage, ChatStatus, ModelOption } from '../../service
     .tool-call-chip mat-icon { font-size: 14px; width: 14px; height: 14px; color: #7b1fa2; }
     .tool-name { font-weight: 500; }
     .tool-result { color: #4caf50; }
+    .tool-call-chip.pending { background: rgba(240, 160, 32, 0.14); }
+    .tool-pending { color: #b45309; font-style: italic; animation: toolPulse 1.2s ease-in-out infinite; }
+    @keyframes toolPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 
     .throughput-info {
       display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px;

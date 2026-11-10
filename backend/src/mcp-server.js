@@ -161,6 +161,26 @@ const TOOLS = [
 ];
 
 // Tool handlers
+// Short-TTL cache for read-heavy tools so repeated agent calls (same turn or
+// quick follow-ups) skip the DB round-trip and the model's next pass starts sooner.
+const TOOL_CACHE_TTL_MS = parseInt(process.env.MCP_CACHE_TTL_MS || '10000', 10);
+const CACHEABLE_TOOLS = new Set([
+  'list_categories', 'get_sales_summary', 'get_sales_summary_by_date',
+  'get_sales_by_date', 'get_top_customers', 'get_schema',
+]);
+const toolCache = new Map();
+
+function cacheGet(key) {
+  const hit = toolCache.get(key);
+  if (hit && hit.expires > Date.now()) return hit.result;
+  if (hit) toolCache.delete(key);
+  return undefined;
+}
+
+function cacheSet(key, result) {
+  toolCache.set(key, { expires: Date.now() + TOOL_CACHE_TTL_MS, result });
+}
+
 async function handleTool(name, args) {
   switch (name) {
     case 'list_categories': {
@@ -436,7 +456,15 @@ async function main() {
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
     try {
+      const key = CACHEABLE_TOOLS.has(name) ? `${name}:${JSON.stringify(args || {})}` : null;
+      if (key) {
+        const cached = cacheGet(key);
+        if (cached !== undefined) {
+          return { content: [{ type: 'text', text: JSON.stringify(cached, null, 2) }] };
+        }
+      }
       const result = await handleTool(name, args || {});
+      if (key) cacheSet(key, result);
       return {
         content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
       };

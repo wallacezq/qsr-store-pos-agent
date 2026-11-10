@@ -49,7 +49,12 @@ Tool-use rules:
 - Table availability, occupancy, dirty/clean status → call the table-status tools.
 - If no dedicated tool fits, use run_query with a read-only SELECT rather than refusing.
 
-After a tool returns, summarize the actual numbers concisely. Be helpful and brief.`;
+After a tool returns, summarize the actual numbers concisely. Be helpful and brief.
+
+Efficiency (keep responses fast):
+- Call at most ONE tool for a question unless a second is truly required; prefer the most specific dedicated tool.
+- Do NOT re-call a tool whose result you already have, and do not make extra "double-check" calls.
+- As soon as a tool returns the data you need, answer immediately instead of calling more tools.`;
 
 // Builds the optional model-selection fields for a Hermes request.
 // Per Hermes docs, a bare `model` is ignored on /v1/chat/completions unless
