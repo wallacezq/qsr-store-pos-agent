@@ -10,12 +10,13 @@ import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { provideAnimations } from '@angular/platform-browser/animations';
 import { routes } from './app.routes';
 import { experienceInterceptor } from './services/experience.interceptor';
+import { rateLimitInterceptor } from './services/rate-limit.interceptor';
 
 export const appConfig: ApplicationConfig = {
   providers: [
     provideZoneChangeDetection(),
     provideRouter(routes),
-    provideHttpClient(withInterceptors([experienceInterceptor])),
+    provideHttpClient(withInterceptors([experienceInterceptor, rateLimitInterceptor])),
     provideAnimations()
   ]
 };

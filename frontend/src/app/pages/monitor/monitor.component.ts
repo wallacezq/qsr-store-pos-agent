@@ -87,8 +87,8 @@ import { ModelService, GroupedModels, VisionModel, NewModel, ModelPurpose, Visio
           </span>
         </div>
         <div class="feed-view">
-          <img *ngIf="!failed.has(cam.id)" [src]="feedUrl(cam)" (error)="onImgError(cam.id)" alt="feed">
-          <div class="feed-placeholder" *ngIf="failed.has(cam.id)">
+          <img *ngIf="cam.mode === 'live' && !failed.has(cam.id)" [src]="feedUrl(cam)" (error)="onImgError(cam.id)" alt="feed">
+          <div class="feed-placeholder" *ngIf="cam.mode !== 'live' || failed.has(cam.id)">
             <span class="ph-icon">🎥</span>
             <span class="ph-text">{{ cam.mode === 'simulated' ? 'SIMULATED FEED' : 'NO SIGNAL' }}</span>
           </div>
@@ -474,7 +474,7 @@ export class MonitorComponent implements OnInit, OnDestroy {
     this.loadExportJobs();
     // Refresh camera status + live snapshots periodically.
     this.subs.push(interval(4000).subscribe(() => this.loadCameras()));
-    this.subs.push(interval(1000).subscribe(() => { this.feedTick = Date.now(); }));
+    this.subs.push(interval(2000).subscribe(() => { this.feedTick = Date.now(); }));
     this.subs.push(interval(10000).subscribe(() => this.loadStatus()));
     this.subs.push(interval(4000).subscribe(() => this.loadExportJobs()));
   }

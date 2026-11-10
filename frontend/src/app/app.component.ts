@@ -16,6 +16,7 @@ import { MatButtonToggleModule } from '@angular/material/button-toggle';
 import { ThemeService } from './services/theme.service';
 import { SimulatorService } from './services/simulator.service';
 import { ExperienceService, Experience } from './services/experience.service';
+import { ToastService } from './services/toast.service';
 import { MetricsPanelComponent } from './components/metrics-panel/metrics-panel.component';
 
 @Component({
@@ -89,6 +90,12 @@ import { MetricsPanelComponent } from './components/metrics-panel/metrics-panel.
       </mat-toolbar>
       <router-outlet></router-outlet>
       <app-metrics-panel></app-metrics-panel>
+
+      <div class="toast-stack">
+        <div class="toast" *ngFor="let t of toastService.toasts()" [ngClass]="'toast-' + t.type" (click)="toastService.dismiss(t.id)">
+          {{ t.message }}
+        </div>
+      </div>
     </div>
   `,
   styles: [`
@@ -142,13 +149,25 @@ import { MetricsPanelComponent } from './components/metrics-panel/metrics-panel.
       0%, 100% { opacity: 1; }
       50% { opacity: 0.5; }
     }
+    .toast-stack {
+      position: fixed; right: 16px; bottom: 16px; z-index: 2000;
+      display: flex; flex-direction: column; gap: 8px; max-width: 360px;
+    }
+    .toast {
+      padding: 10px 14px; border-radius: 8px; font-size: 13px; color: #fff;
+      cursor: pointer; box-shadow: 0 6px 18px rgba(0,0,0,.25);
+    }
+    .toast-info { background: #334155; }
+    .toast-warn { background: #b45309; }
+    .toast-error { background: #b91c1c; }
   `]
 })
 export class AppComponent {
   constructor(
     public themeService: ThemeService,
     public simulatorService: SimulatorService,
-    public experienceService: ExperienceService
+    public experienceService: ExperienceService,
+    public toastService: ToastService
   ) {}
 
   switchExperience(value: Experience): void {

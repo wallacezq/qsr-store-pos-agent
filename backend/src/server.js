@@ -34,10 +34,15 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Experience']
 }));
 
-// Rate limiting
+// Rate limiting. Skip the app's own high-frequency polling (live-preview
+// snapshots + SSE streams) so normal dashboard use can't trip 429 and block
+// state-changing routes like the simulator toggle.
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 1000
+  max: 5000,
+  skip: (req) =>
+    req.method === 'GET' &&
+    (/\/snapshot$/.test(req.path) || /\/stream$/.test(req.path)),
 });
 app.use(limiter);
 
