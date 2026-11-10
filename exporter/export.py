@@ -93,11 +93,28 @@ def export_hf(model_id, out_dir, precision, task):
     return _first_xml(out_dir)
 
 
-def export_clip_zeroshot(model_id, out_dir, labels):
+def _compress_weights_int8(xml):
+    """NNCF INT8 weight compression of an OpenVINO IR, in place. rt_info (incl.
+    model_type=clip_zeroshot) is carried over so gvaclassify still resolves it."""
+    import nncf
+    import openvino as ov
+
+    model = ov.Core().read_model(xml)
+    compressed = nncf.compress_weights(model)
+    try:  # NNCF usually preserves rt_info; re-copy model_info if it didn't.
+        if model.has_rt_info("model_info") and not compressed.has_rt_info("model_info"):
+            compressed.set_rt_info(model.get_rt_info("model_info"), "model_info")
+    except Exception:  # noqa: BLE001 - rt_info API differences must not fail export
+        pass
+    ov.save_model(compressed, xml)
+
+
+def export_clip_zeroshot(model_id, out_dir, labels, precision="FP16"):
     """CLIP zero-shot IR + text-label embeddings via DL Streamer's helpers.
 
     Produces the clip_zeroshot image-encoder IR and a .safetensors label bank
-    that gvaclassify consumes. Returns (xml, embeddings).
+    that gvaclassify consumes. INT8 applies NNCF weight compression to the IR in
+    place (rt_info preserved). Returns (xml, embeddings).
     """
     os.makedirs(out_dir, exist_ok=True)
     labels = labels or DEFAULT_CLIP_LABELS
@@ -113,6 +130,10 @@ def export_clip_zeroshot(model_id, out_dir, labels):
             "export produced no IR tagged model_type=clip_zeroshot; gvaclassify needs "
             "this tag (ensure the exporter's DL Streamer scripts match the runtime)."
         )
+
+    # The DL Streamer clip-zeroshot exporter emits FP16/FP32; quantize to INT8 here.
+    if precision == "INT8":
+        _compress_weights_int8(xml)
 
     # 2) Text-label embeddings (.safetensors) aligned to the same CLIP model.
     labels_path = os.path.join(out_dir, "labels.txt")
@@ -142,7 +163,7 @@ def main():
             xml = export_yolo(args.model, args.out, args.precision)
         elif args.source == "clip-zeroshot":
             labels = [s.strip() for s in args.labels.split(",")] if args.labels else None
-            xml, embeddings = export_clip_zeroshot(args.model, args.out, labels)
+            xml, embeddings = export_clip_zeroshot(args.model, args.out, labels, args.precision)
         else:
             xml = export_hf(args.model, args.out, args.precision, args.task)
     except Exception as exc:  # noqa: BLE001 - surface any export error to the caller

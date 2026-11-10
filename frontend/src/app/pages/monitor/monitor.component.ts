@@ -209,7 +209,7 @@ import { ModelService, GroupedModels, VisionModel, NewModel, ModelPurpose, Visio
               <option value="clip">CLIP (zero-shot)</option>
             </select>
           </label>
-          <label *ngIf="exportDraft.source !== 'clip-zeroshot'">Precision
+          <label>Precision
             <select [(ngModel)]="exportDraft.precision">
               <option value="FP32">FP32</option>
               <option value="FP16">FP16</option>
