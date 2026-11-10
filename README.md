@@ -22,9 +22,9 @@ Switch between experiences from the toolbar toggle. Each experience has its own 
 - Dark/Standard theme switching
 - Experience switcher (Grocery / Café)
 - **Operation Insights** dashboard (default landing page) — live KPIs, revenue trend, table status, inventory, and a **Workflow Engine Events** MQTT feed
-- **Live Monitor** tab — RTSP/ONVIF cameras + AI vision ([docs](docs/LIVE-MONITOR.md))
+- **Live Monitor** tab — RTSP/ONVIF cameras + AI vision with live annotated preview ([docs](docs/LIVE-MONITOR.md))
 - Integrated simulator snap-on option
-- Configuration page for MCP server management (plus stock check / replenish stock)
+- Configuration page for MCP server management, POS settings (stock check / replenish), and **Agent (LLM) latency tuning**
 - **Agent Chat** tab for agentic AI interaction
 
 ### Backend (RESTful API)
@@ -49,16 +49,21 @@ Switch between experiences from the toolbar toggle. Each experience has its own 
 - Toggle on/off from the Config UI or run standalone
 
 ### Agent Chat (Hermes + MCP)
-- Chat UI with streaming responses
+- Chat UI with streaming responses and live "calling &lt;tool&gt;…" indicators
 - Sidebar showing connection status, available tools, and live table grid
 - Hermes Gateway connects to multiple MCP servers (POS, table-status, external vision AI)
 - Simulator generates synthetic vision events when external hardware is unavailable
+- **Latency controls** (Config tab): max response tokens, temperature, and history window; short-TTL caching on hot MCP read tools
 
 ### Live Monitor (AI Vision)
 - Add any number of **RTSP / ONVIF** cameras
 - Per-camera Intel DL Streamer pipeline: detection + **zero-shot CLIP** classification of empty / occupied / dirty tables
+- **Live annotated preview** — the camera tile shows a frame grab with detection boxes and the classification label overlaid
+- **Per-camera overrides** (⚙ panel): choose the detection / CLIP / classification model and the inference **device (CPU / GPU / NPU)**
+- **Graceful degradation** — if CLIP can't initialize, the pipeline auto-falls back to detection-only (boxes still shown, **DETECT-ONLY** badge)
 - Detections publish to MQTT and feed the table-status service, dashboard, and agent
-- Model manager (Detection / Classification / CLIP) + **model exporter** (YOLO, HuggingFace, CLIP zero-shot → OpenVINO IR)
+- Model manager (Detection / Classification / CLIP) with **quantization (FP32 / FP16 / INT8)** tracking + **model exporter** (YOLO, HuggingFace, CLIP zero-shot → OpenVINO IR, incl. INT8 CLIP)
+- GPU/NPU acceleration via `/dev/dri` + Intel NPU accel-node passthrough
 - 📖 [Full Live Monitor documentation →](docs/LIVE-MONITOR.md)
 
 ## Architecture
@@ -514,6 +519,7 @@ access). Two named volumes hold vision data:
 | Volume | Purpose |
 |--------|---------|
 | `vision_models` | OpenVINO model files, shared with the pipeline/exporter containers |
+| `vision_snapshots` | Live annotated preview frames, written by the pipeline and served to the UI |
 | `vision_data` | Camera/model/settings registry JSON (survives rebuilds) |
 
 The `vision-exporter` service is **build-only** (profile `tools`) — it is not started by `docker compose up`.
@@ -660,8 +666,35 @@ curl http://localhost:9101/metrics
 | `CAFE_TABLE_COUNT` | `15` | Number of tracked tables (9 floor + 6 bar) |
 | `HERMES_GATEWAY_URL` | `http://localhost:3001` | Hermes agent gateway URL |
 | `QMMD_URL` | `http://qmmd:9101` | qmmd GPU metrics endpoint |
+| `CHAT_MAX_TOKENS` | `768` | Default agent max response tokens (tunable in the Config tab) |
+| `CHAT_TEMPERATURE` | `0.2` | Default agent sampling temperature (tunable in the Config tab) |
+| `CHAT_HISTORY_LIMIT` | `8` | Prior chat turns sent per request (tunable in the Config tab) |
+| `MCP_CACHE_TTL_MS` | `10000` | Short-TTL cache for hot MCP read tools |
 | `PORT` | `3000` | Backend API port |
 
-> **Live Monitor / vision** variables (`VISION_*`, `DATA_DIR`) are documented in [docs/LIVE-MONITOR.md](docs/LIVE-MONITOR.md).
+> **Live Monitor / vision** variables (`VISION_*` incl. `VISION_RENDER_GID`, `VISION_NPU_DEVICE`, `DATA_DIR`) are documented in [docs/LIVE-MONITOR.md](docs/LIVE-MONITOR.md).
 
 Or toggle the MCP server from the **Config** tab in the UI.
+
+---
+
+## Changelog
+
+Notable changes, newest first. Dates are `YYYY-MM-DD`.
+
+### 2026-11-10
+**Live Monitor / vision**
+- Live annotated camera preview (detection boxes + classification label overlaid, ~2 fps) via a shared `vision_snapshots` volume.
+- Per-camera model and inference-device (CPU/GPU/NPU) overrides from the ⚙ panel.
+- Graceful degradation: pipeline auto-falls back to detection-only when CLIP can't initialize, with a **DETECT-ONLY** badge; health now reflects a streaming pipeline (not just table events).
+- GPU/NPU passthrough: `--device /dev/dri` + render-group `--group-add` (`VISION_RENDER_GID`, auto-detected) and Intel NPU accel node (`VISION_NPU_DEVICE`).
+- Model exporter hardening: world-readable outputs, `clip_zeroshot` tag verification, `DLS_REF` pinned to the runtime (`VISION_DLS_REF`), and **INT8 CLIP** export via NNCF weight compression.
+- Model store tracks **precision** (FP32/FP16/INT8); precision selector shown for all export sources incl. CLIP.
+
+**Agent / LLM**
+- Config-tab **Agent (LLM) latency controls**: max response tokens, temperature, and history window (persisted; env defaults `CHAT_MAX_TOKENS` / `CHAT_TEMPERATURE` / `CHAT_HISTORY_LIMIT`).
+- Short-TTL caching of hot MCP read tools (`MCP_CACHE_TTL_MS`); tighter system prompt to reduce redundant tool calls; live "calling &lt;tool&gt;…" indicators in the chat UI.
+
+**Platform**
+- Rate limiter no longer throttles the app's own high-frequency polling (`/snapshot`, `/stream`) and ceiling raised, fixing stack-wide `429` lockouts; global 429 toast with automatic GET retry.
+

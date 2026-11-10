@@ -30,16 +30,22 @@ and the **Workflow Engine Events** feed all reflect real camera activity.
 ## UI
 
 ### Cameras tab
-- **Add Camera** — name, protocol (RTSP/ONVIF), stream URL, zone, inference device.
-- **Live feed grid** — one tile per camera with an annotated snapshot (when available), a state overlay
-  (`Occupied · 82%`), a health badge, and start/stop/remove controls.
+- **Add Camera** — name, protocol (RTSP/ONVIF), stream URL, zone, route-to experience, inference device.
+- **Live feed grid** — one tile per camera with a **live annotated preview** (detection boxes + classification
+  label overlaid, ~2 fps), a state overlay (`Occupied · 82%`), a health badge, and start/stop/remove controls.
+- **Per-camera ⚙ override** — pick the detection / CLIP / classification model and the inference device
+  (CPU/GPU/NPU) for that camera; saving restarts just its pipeline.
+- **Badges** — `DETECTING` / `STARTING` / `SIMULATED` / `OFFLINE`, plus **DETECT-ONLY** when CLIP fell back
+  (boxes still shown, no empty/occupied/dirty label).
 - **Event stream** — detections across all cameras with a status filter (Verified / Pending review / Rejected,
   derived from detection confidence).
 
 ### Models tab
-- **Export / Convert → OpenVINO IR** — pull and convert an open model (see [Model exporter](#model-exporter)).
+- **Export / Convert → OpenVINO IR** — pull and convert an open model (see [Model exporter](#model-exporter)),
+  with a **precision** selector (FP32 / FP16 / **INT8**) for all sources including CLIP.
 - **Register existing model** — point at an already‑present IR (`.xml`, plus CLIP `.safetensors` embeddings).
-- **Grouped lists** — Detection / Classification / CLIP, each with an **ACTIVE** marker, ★ activate, and 🗑 delete.
+- **Grouped lists** — Detection / Classification / CLIP, each row showing its **precision** pill and an
+  **ACTIVE** marker, ★ activate, and 🗑 delete.
 - **Status banner** — shows whether real pipelines are enabled (`DLStreamer`) or `Simulation`, and the image in use.
 
 ---
@@ -71,18 +77,24 @@ camera ──► DL Streamer pipeline (or simulator) ──► MQTT  vision/dete
 rtspsrc location=<URL> latency=100 protocols=tcp ! rtph264depay ! decodebin3 !
 gvadetect model=<detector>.xml device=<DEV> threshold=0.3 inference-interval=3 !
 gvatrack tracking-type=short-term-imageless !
-gvaclassify model=<clip-image-encoder>.xml zeroshot-embeddings-file=<labels>.safetensors object-class="dining table" device=<DEV> !
+gvaclassify model=<clip-image-encoder>.xml zeroshot-embeddings-file=<labels>.safetensors labels-file=<labels>.txt zeroshot-topk=1 object-class="dining table" device=<DEV> !
 gvawatermark ! tee
   ├─ gvametaconvert format=json ! gvametapublish method=mqtt topic=vision/detections/<id>
-  └─ jpegenc ! multifilesink   (annotated snapshot, optional)
+  └─ videorate (2 fps) ! jpegenc ! multifilesink   (annotated live-preview frame)
 ```
+
+If the CLIP stage can't initialize (missing/unreadable embeddings, label mismatch, etc.) the pipeline is
+relaunched **detection-only** (the `gvaclassify` stage is dropped) so the preview and detection boxes keep
+working; the camera then reports `classify=false` (**DETECT-ONLY** badge). Set `VISION_CLASSIFY=off` to force
+detection-only, or `on` to always include CLIP.
 
 The pipeline is run **via Docker** — the backend launches it as a sibling container using the mounted
-Docker socket:
+Docker socket. GPU/NPU cameras also pass the render device and (for NPU) the accel node:
 
 ```
-docker run --rm --name vision-<id> --network edgemart-net [--device /dev/dri] \
-  -v vision_models:/models:ro \
+docker run --rm --name vision-<id> --network edgemart-net --add-host host.docker.internal:host-gateway \
+  [--device /dev/dri] [--device /dev/accel/accel0] [--group-add <render-gid>] \
+  -v vision_models:/models:ro -v vision_snapshots:/snapshots \
   intel/dlstreamer:2026.3.0-ubuntu24-rc1 \
   bash -c 'source /opt/intel/dlstreamer/setupvars.sh; exec gst-launch-1.0 -v "$@"' gst <pipeline...>
 ```
@@ -124,11 +136,13 @@ The backend runs the [`exporter`](../exporter) image as a sibling container that
 |--------|---------|-------|
 | **YOLO** | Ultralytics `YOLO(...).export(format="openvino")` | e.g. `yolov8n`, `yolov8n-cls`. Supports FP32/FP16/INT8. |
 | **HuggingFace** | `optimum-cli export openvino` | generic HF → IR (e.g. `openai/clip-vit-base-patch32`). |
-| **CLIP (zero‑shot)** | DL Streamer `download_hf_models.py --export-variant clip-zeroshot` + `clip_text_embeddings.py` | produces the `clip_zeroshot` IR **and** the `table-states.safetensors` label bank (labels configurable). |
+| **CLIP (zero‑shot)** | DL Streamer `download_hf_models.py --export-variant clip-zeroshot` + `clip_text_embeddings.py` | produces the `clip_zeroshot` IR **and** the `table-states.safetensors` label bank (labels configurable). **INT8** applies NNCF weight compression to the IR. |
 
-Build the exporter image with `docker compose --profile tools build vision-exporter`. First build is large
-(ultralytics pulls torch) and the image sparse‑clones DL Streamer’s `scripts/download_models/` for the
-CLIP zero‑shot variant (pin with the `DLS_REF` build arg).
+The exporter verifies the CLIP IR is tagged `model_type=clip_zeroshot` and makes all outputs world‑readable
+(the non‑root pipeline user must read them). Build it with `docker compose --profile tools build vision-exporter`.
+First build is large (ultralytics pulls torch) and the image sparse‑clones DL Streamer’s
+`scripts/download_models/` for the CLIP zero‑shot variant — pin it with the `DLS_REF` build arg to match the
+runtime image (default `v2026.3.0-rc1`).
 
 ---
 
@@ -137,6 +151,7 @@ CLIP zero‑shot variant (pin with the `DLS_REF` build arg).
 | Volume | Mounted at | Purpose |
 |--------|-----------|---------|
 | `vision_models` | backend `/models:ro`, exporter/pipeline containers `/models` | OpenVINO model files (shared across containers). |
+| `vision_snapshots` | backend `/snapshots`, pipeline containers `/snapshots` | Live annotated preview frames (`<cameraId>.jpg`). |
 | `vision_data` | backend `/app/data` | Registry JSON (cameras, models, settings) — survives rebuilds. |
 
 Both use fixed names (no compose project prefix) so sibling containers launched via
@@ -154,15 +169,19 @@ Both use fixed names (no compose project prefix) so sibling containers launched 
 | `VISION_INVOKE` | `docker` | `docker` (sibling container) or `native` (gst on PATH). |
 | `VISION_DOCKER_IMAGE` | `intel/dlstreamer:2026.3.0-ubuntu24-rc1` | DL Streamer image for pipelines. |
 | `VISION_DOCKER_NETWORK` | `edgemart-net` | Network the pipeline container joins (to reach MQTT). |
-| `VISION_DEVICE` | `CPU` | Inference device (`CPU`/`GPU`/`NPU`). |
+| `VISION_DEVICE` | `CPU` | Default inference device (`CPU`/`GPU`/`NPU`); per-camera overridable. |
+| `VISION_RENDER_GID` | auto-detect | Host GID owning `/dev/dri/renderD128`, added via `--group-add` for GPU/NPU. |
+| `VISION_NPU_DEVICE` | `/dev/accel/accel0` | Intel NPU accel node passed through for NPU pipelines. |
+| `VISION_CLASSIFY` | `auto` | CLIP stage: `auto` (include if present), `on`, or `off` (detection-only). |
 | `VISION_MODELS_DIR` | `vision_models` | Named volume (or host path) mounted at `/models`. |
-| `VISION_DETECT_MODEL` | `/models/yolov8n/yolov8n.xml` | Default detector (overridden by the active model). |
+| `VISION_DETECT_MODEL` | `/models/yolov8n/yolov8n.xml` | Default detector (overridden by the active/per-camera model). |
 | `VISION_CLIP_MODEL` | `/models/clip/clip-image-encoder.xml` | Default CLIP encoder. |
 | `VISION_ZEROSHOT_EMBEDDINGS` | `/models/clip/table-states.safetensors` | Default label bank. |
 | `VISION_TABLE_CLASS` | `dining table` | gvadetect label the classifier runs on. |
-| `VISION_SNAPSHOT_HOST_DIR` | — | Optional host dir for annotated snapshots (`/snapshots`). |
+| `VISION_SNAPSHOT_HOST_DIR` | `vision_snapshots` | Volume/host dir the pipeline writes preview frames to (`/snapshots`). |
 | `VISION_SIMULATE` | — | `1` forces simulation. |
 | `VISION_EXPORTER_IMAGE` | `edgemart/vision-exporter:latest` | Exporter image. |
+| `VISION_DLS_REF` | `v2026.3.0-rc1` | DL Streamer scripts ref for the exporter build (match the runtime image). |
 | `DATA_DIR` | `/app/data` (docker) | Where the registry JSON is persisted. |
 
 ---
@@ -197,7 +216,19 @@ Both use fixed names (no compose project prefix) so sibling containers launched 
   or the export itself failed (no network/proxy to pull weights, gated HF model, model id typo).
 - **Camera shows `STARTING` but never `DETECTING`** — the pipeline launched but produced no detections.
   Check the models exist at the expected `/models` paths, the RTSP URL is reachable, and (for GPU/NPU)
-  the device is passed through.
-- **Everything stays `SIMULATED`** — no models present on `vision_models`, or `VISION_SIMULATE=1`. Export/populate
+  the device is passed through. A camera that streams frames is treated as live even without table detections.
+- **`gvaclassify … post-processing is NULL`** — the CLIP post-processor couldn't be built. Usual causes:
+  (1) the embeddings `.safetensors` isn't readable by the non-root pipeline user — re-export with the current
+  exporter (makes outputs world-readable) or `chmod -R a+rX` the model dir; (2) the CLIP IR isn't tagged
+  `model_type=clip_zeroshot` — re-export via **Models → CLIP (zero-shot)**. The pipeline auto-falls back to
+  detection-only (**DETECT-ONLY** badge) when this happens.
+- **GPU camera fails with `[GPU] … no supported devices found`** — the container can't open the GPU. Ensure
+  `/dev/dri` is passed and the runtime user is in the host render group (`VISION_RENDER_GID`, auto-detected
+  from the backend's `/dev/dri` mount). NPU additionally needs `/dev/accel/accel0` (`VISION_NPU_DEVICE`).
+  GPU/NPU only work on a Linux host with the Intel compute runtime installed.
+- **RTSP `Could not open resource` / `Failed to connect`** — from inside the container `127.0.0.1` is the
+  container itself; use `rtsp://host.docker.internal:<port>/…` for a host RTSP server, and make sure that
+  server binds `0.0.0.0` and its port is allowed through the firewall.
+- **Everything stays `SIMULATED`** — no detection model present on `vision_models`, or `VISION_SIMULATE=1`. Export/populate
   models, then restart the camera.
 - **Verify socket access from the backend** — `docker compose exec backend docker ps`.
