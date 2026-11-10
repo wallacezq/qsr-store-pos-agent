@@ -30,6 +30,20 @@ const DOCKER_NETWORK = process.env.VISION_DOCKER_NETWORK || '';
 const INVOKE = (process.env.VISION_INVOKE || 'docker').toLowerCase();
 const FORCE_SIM = process.env.VISION_SIMULATE === '1';
 const DEVICE_DEFAULT = process.env.VISION_DEVICE || 'CPU';
+// Intel NPU accel node, passed through for NPU pipelines (GPU uses /dev/dri only).
+const NPU_DEVICE = process.env.VISION_NPU_DEVICE || '/dev/accel/accel0';
+// Host GID that owns /dev/dri/renderD128; a GPU/NPU pipeline's non-root user needs
+// membership (via --group-add) to open the device. Prefer an explicit env, else
+// auto-detect when /dev/dri is visible to this process.
+const RENDER_GID = process.env.VISION_RENDER_GID || detectRenderGid();
+
+function detectRenderGid() {
+  try {
+    const node = fs.readdirSync('/dev/dri').find((n) => n.startsWith('renderD'));
+    if (node) return String(fs.statSync(path.join('/dev/dri', node)).gid);
+  } catch { /* /dev/dri not visible to this process */ }
+  return '';
+}
 // OpenVINO IR model paths. In docker mode these resolve INSIDE the container,
 // where VISION_MODELS_DIR is bind-mounted to /models.
 const DETECT_MODEL = process.env.VISION_DETECT_MODEL || '/models/yolov8n/yolov8n.xml';
@@ -150,7 +164,13 @@ function buildDockerArgs(camera) {
   // Let the pipeline reach an RTSP server running on the Docker host.
   args.push('--add-host', 'host.docker.internal:host-gateway');
   if (DOCKER_NETWORK) args.push('--network', DOCKER_NETWORK);
-  if (device !== 'CPU') args.push('--device', '/dev/dri'); // GPU/NPU passthrough
+  if (device !== 'CPU') {
+    args.push('--device', '/dev/dri'); // GPU/NPU passthrough
+    if (device === 'NPU') args.push('--device', NPU_DEVICE); // Intel NPU accel node
+    // The non-root runtime user must belong to the host render-node group or
+    // OpenVINO can't open the GPU ("no supported devices found").
+    if (RENDER_GID) args.push('--group-add', RENDER_GID);
+  }
   if (MODELS_HOST_DIR) args.push('-v', `${MODELS_HOST_DIR}:/models:ro`);
   if (SNAPSHOT_HOST_DIR) args.push('-v', `${SNAPSHOT_HOST_DIR}:/snapshots`);
   args.push(DOCKER_IMAGE, 'bash', '-c',

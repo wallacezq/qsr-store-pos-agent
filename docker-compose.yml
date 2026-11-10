@@ -50,6 +50,9 @@ services:
       VISION_DOCKER_IMAGE: ${VISION_DOCKER_IMAGE:-intel/dlstreamer:2026.3.0-ubuntu24-rc1}
       VISION_DOCKER_NETWORK: edgemart-net
       VISION_DEVICE: ${VISION_DEVICE:-CPU}
+      # Host GID owning /dev/dri/renderD128 for GPU/NPU pipelines (--group-add).
+      # Auto-detected from the mounted /dev/dri below; override here if needed.
+      VISION_RENDER_GID: ${VISION_RENDER_GID:-}
       # HuggingFace token for authenticated model-exporter downloads (higher rate limit).
       HF_TOKEN: ${HF_TOKEN:-}
       # Model files live on the vision_models volume (also mounted into the DL
@@ -65,6 +68,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - vision_data:/app/data            # persists cameras/models/settings registry
       - vision_models:/models:ro         # OpenVINO models, shared with vision containers
+      - /dev/dri:/dev/dri:ro              # read-only: detect GPU render-node GID (GPU hosts)
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
