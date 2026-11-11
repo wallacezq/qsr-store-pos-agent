@@ -9,6 +9,7 @@ const router = express.Router();
 const { getTableStatusService } = require('../services/table-status');
 const { randomUUID } = require('crypto');
 const mqttPublisher = require('../services/mqtt-publisher');
+const { ThinkTagSplitter } = require('../services/think-splitter');
 
 const HERMES_GATEWAY_URL = process.env.HERMES_GATEWAY_URL || 'http://localhost:3001';
 const HERMES_API_KEY = process.env.HERMES_API_KEY || 'change-me-local-dev';
@@ -156,6 +157,63 @@ router.post('/', async (req, res) => {
     const decoder = new TextDecoder();
     let hasContent = false;
 
+    // Reasoning ("thinking") arrives either as dedicated delta fields
+    // (reasoning_content / reasoning) or inline in content as <think> tags.
+    // Both are normalised to { type: 'thinking' } SSE events; the answer stays
+    // { type: 'content' } so it never contains the chain of thought.
+    const splitter = new ThinkTagSplitter();
+    let sseBuffer = '';
+
+    const sendThinking = (text) => {
+      if (text) res.write(`data: ${JSON.stringify({ type: 'thinking', content: text })}\n\n`);
+    };
+    const sendSegment = (seg) => {
+      if (seg.type === 'thinking') {
+        sendThinking(seg.text);
+      } else if (seg.text) {
+        hasContent = true;
+        res.write(`data: ${JSON.stringify({ type: 'content', content: seg.text })}\n\n`);
+      }
+    };
+    const flushSplitter = () => { for (const seg of splitter.flush()) sendSegment(seg); };
+
+    const handleSseLine = (rawLine) => {
+      const line = rawLine.replace(/\r$/, '');
+      if (!line.startsWith('data: ')) return;
+      const data = line.slice(6);
+      if (data === '[DONE]') {
+        flushSplitter();
+        res.write('data: [DONE]\n\n');
+        return;
+      }
+      try {
+        const parsed = JSON.parse(data);
+        const delta = parsed.choices?.[0]?.delta;
+        // Forward reasoning chunks
+        const reasoning = delta?.reasoning_content ?? delta?.reasoning;
+        if (typeof reasoning === 'string' && reasoning) sendThinking(reasoning);
+        // Forward content chunks (inline <think> blocks are split out)
+        if (delta?.content) {
+          for (const seg of splitter.push(delta.content)) sendSegment(seg);
+        }
+        // Forward tool call information
+        if (delta?.tool_calls) {
+          res.write(`data: ${JSON.stringify({ type: 'tool_call', content: delta.tool_calls })}\n\n`);
+        }
+        // Forward tool results
+        if (parsed.type === 'tool_result') {
+          res.write(`data: ${JSON.stringify({ type: 'tool_result', tool: parsed.tool, result: parsed.result })}\n\n`);
+        }
+        // Forward usage stats (token counts)
+        if (parsed.usage) {
+          res.write(`data: ${JSON.stringify({ type: 'usage', prompt_tokens: parsed.usage.prompt_tokens, completion_tokens: parsed.usage.completion_tokens })}\n\n`);
+        }
+      } catch {
+        // Forward raw line if not JSON
+        res.write(`data: ${JSON.stringify({ type: 'content', content: data })}\n\n`);
+      }
+    };
+
     while (true) {
       let readResult;
       try {
@@ -175,42 +233,16 @@ router.post('/', async (req, res) => {
       const { done, value } = readResult;
       if (done) break;
 
-      const chunk = decoder.decode(value, { stream: true });
-      const lines = chunk.split('\n');
-
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6);
-          if (data === '[DONE]') {
-            res.write('data: [DONE]\n\n');
-          } else {
-            try {
-              const parsed = JSON.parse(data);
-              // Forward content chunks
-              if (parsed.choices?.[0]?.delta?.content) {
-                hasContent = true;
-                res.write(`data: ${JSON.stringify({ type: 'content', content: parsed.choices[0].delta.content })}\n\n`);
-              }
-              // Forward tool call information
-              if (parsed.choices?.[0]?.delta?.tool_calls) {
-                res.write(`data: ${JSON.stringify({ type: 'tool_call', content: parsed.choices[0].delta.tool_calls })}\n\n`);
-              }
-              // Forward tool results
-              if (parsed.type === 'tool_result') {
-                res.write(`data: ${JSON.stringify({ type: 'tool_result', tool: parsed.tool, result: parsed.result })}\n\n`);
-              }
-              // Forward usage stats (token counts)
-              if (parsed.usage) {
-                res.write(`data: ${JSON.stringify({ type: 'usage', prompt_tokens: parsed.usage.prompt_tokens, completion_tokens: parsed.usage.completion_tokens })}\n\n`);
-              }
-            } catch {
-              // Forward raw line if not JSON
-              res.write(`data: ${JSON.stringify({ type: 'content', content: data })}\n\n`);
-            }
-          }
-        }
-      }
+      // A network chunk can end mid-line; keep the incomplete tail for the next read.
+      sseBuffer += decoder.decode(value, { stream: true });
+      const lines = sseBuffer.split('\n');
+      sseBuffer = lines.pop() || '';
+      for (const line of lines) handleSseLine(line);
     }
+
+    // Drain a final unterminated line and any partial tag still buffered.
+    if (sseBuffer) handleSseLine(sseBuffer);
+    flushSplitter();
 
     if (!res.writableEnded) {
       res.write('data: [DONE]\n\n');
@@ -278,8 +310,10 @@ router.post('/message', async (req, res) => {
     }
 
     const data = await response.json();
+    const msg = data.choices?.[0]?.message;
     res.json({
-      message: data.choices?.[0]?.message?.content || '',
+      message: msg?.content || '',
+      reasoning: msg?.reasoning_content ?? msg?.reasoning ?? undefined,
       toolCalls: data.choices?.[0]?.message?.tool_calls || [],
       conversationId: data.conversation_id || conversationId,
     });

@@ -16,6 +16,14 @@ export interface ChatMessage {
   isStreaming?: boolean;
   throughput?: ThroughputInfo;
   failed?: boolean;
+  /** Model reasoning streamed separately from the answer. */
+  thinking?: string;
+  /** True while reasoning tokens are actively streaming. */
+  isThinking?: boolean;
+  /** Total time spent thinking (ms), set once a thinking phase ends. */
+  thinkingMs?: number;
+  /** Whether the thinking panel is expanded. Opens when thinking starts, collapses when it ends. */
+  thinkingOpen?: boolean;
 }
 
 export interface ThroughputInfo {
@@ -76,6 +84,15 @@ export class ChatService {
     return this.selectedModel;
   }
 
+  /** Expand/collapse the thinking panel of the message at `index`. */
+  toggleThinking(index: number): void {
+    const msgs = this.messagesSubject.value;
+    if (!msgs[index]) return;
+    const next = [...msgs];
+    next[index] = { ...next[index], thinkingOpen: !next[index].thinkingOpen };
+    this.messagesSubject.next(next);
+  }
+
   /**
    * Send a message and receive a streamed response via SSE.
    * Returns an observable that emits partial content as it arrives.
@@ -98,6 +115,30 @@ export class ChatService {
       let tokenCount = 0;
       let promptTokens: number | undefined;
       let completionTokens: number | undefined;
+
+      // Thinking state. A reply can think more than once (e.g. before and after a
+      // tool call), so durations accumulate across phases.
+      let thinkingText = '';
+      let thinkStart: number | null = null;
+      let thinkingMs = 0;
+      let autoCollapsed = false;
+
+      const patchLast = (patch: Partial<ChatMessage>) => {
+        const msgs = this.messagesSubject.value;
+        const lastIdx = msgs.length - 1;
+        msgs[lastIdx] = { ...msgs[lastIdx], ...patch };
+        this.messagesSubject.next([...msgs]);
+      };
+
+      /** Ends the current thinking phase (no-op if not thinking) and auto-collapses the panel once. */
+      const closeThinking = () => {
+        if (thinkStart === null) return;
+        thinkingMs += performance.now() - thinkStart;
+        thinkStart = null;
+        const patch: Partial<ChatMessage> = { isThinking: false, thinkingMs: Math.round(thinkingMs) };
+        if (!autoCollapsed) { patch.thinkingOpen = false; autoCollapsed = true; }
+        patchLast(patch);
+      };
 
       fetch('/api/chat', {
         method: 'POST',
@@ -135,6 +176,7 @@ export class ChatService {
             if (!line.startsWith('data: ')) continue;
             const data = line.slice(6).trim();
             if (data === '[DONE]') {
+              closeThinking();
               // Calculate throughput
               const endTime = performance.now();
               const ttft = firstTokenTime ? firstTokenTime - requestStart : undefined;
@@ -161,7 +203,24 @@ export class ChatService {
 
             try {
               const parsed = JSON.parse(data);
-              if (parsed.type === 'content') {
+              if (parsed.type === 'thinking') {
+                // Reasoning counts as generated tokens, so TTFT/decode speed stay consistent.
+                if (!firstTokenTime) firstTokenTime = performance.now();
+                tokenCount++;
+                const isFirstPhase = !thinkingText;
+                if (thinkStart === null) {
+                  thinkStart = performance.now();
+                  if (thinkingText) thinkingText += '\n\n'; // visual break between phases
+                }
+                thinkingText += parsed.content;
+                patchLast({
+                  thinking: thinkingText,
+                  isThinking: true,
+                  ...(isFirstPhase ? { thinkingOpen: true } : {}),
+                });
+                subscriber.next({ type: 'thinking', content: parsed.content });
+              } else if (parsed.type === 'content') {
+                closeThinking();
                 if (!firstTokenTime) firstTokenTime = performance.now();
                 tokenCount++;
                 fullContent += parsed.content;
@@ -172,6 +231,7 @@ export class ChatService {
                 this.messagesSubject.next([...msgs]);
                 subscriber.next({ type: 'content', content: parsed.content });
               } else if (parsed.type === 'tool_call') {
+                closeThinking();
                 const tc: ToolCallInfo = { name: parsed.content?.[0]?.function?.name || 'unknown', arguments: parsed.content?.[0]?.function?.arguments };
                 toolCalls.push(tc);
                 subscriber.next({ type: 'tool_call', content: tc.name, toolCalls: [tc] });
@@ -183,6 +243,7 @@ export class ChatService {
                 promptTokens = parsed.prompt_tokens;
                 completionTokens = parsed.completion_tokens;
               } else if (parsed.type === 'error') {
+                closeThinking();
                 fullContent += `\n⚠️ ${parsed.content}`;
                 const msgs = this.messagesSubject.value;
                 const lastIdx = msgs.length - 1;
@@ -210,6 +271,7 @@ export class ChatService {
         }
 
         // If stream ended without [DONE]
+        closeThinking();
         const msgs = this.messagesSubject.value;
         const lastIdx = msgs.length - 1;
         msgs[lastIdx] = { ...msgs[lastIdx], content: fullContent, isStreaming: false, toolCalls };
@@ -217,6 +279,7 @@ export class ChatService {
         subscriber.complete();
       }).catch(err => {
         // Update message with error and mark as failed
+        closeThinking();
         const msgs = this.messagesSubject.value;
         const lastIdx = msgs.length - 1;
         msgs[lastIdx] = { ...msgs[lastIdx], content: `⚠️ Connection error: ${err.message}`, isStreaming: false, failed: true };

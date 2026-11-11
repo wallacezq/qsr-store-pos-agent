@@ -105,11 +105,25 @@ import { ChatService, ChatMessage, ChatStatus, ModelOption } from '../../service
             </div>
           </div>
 
-          <div *ngFor="let msg of messages" class="message" [class]="'message-' + msg.role">
+          <div *ngFor="let msg of messages; let i = index; trackBy: trackByIndex" class="message" [class]="'message-' + msg.role">
             <div class="message-avatar">
               <mat-icon>{{ msg.role === 'user' ? 'person' : 'smart_toy' }}</mat-icon>
             </div>
             <div class="message-content">
+              <!-- Thinking panel (model reasoning, streamed separately from the answer) -->
+              <div *ngIf="msg.role === 'assistant' && msg.thinking" class="thinking-panel" [class.live]="msg.isThinking">
+                <button type="button" class="thinking-header"
+                  (click)="toggleThinking(i)"
+                  [attr.aria-expanded]="!!msg.thinkingOpen"
+                  [attr.aria-controls]="'thinking-body-' + i">
+                  <mat-icon class="thinking-icon">psychology</mat-icon>
+                  <span class="thinking-label">{{ thinkingLabel(msg) }}</span>
+                  <span class="spacer"></span>
+                  <mat-icon class="thinking-chevron" [class.open]="msg.thinkingOpen">expand_more</mat-icon>
+                </button>
+                <div *ngIf="msg.thinkingOpen" class="thinking-body" [class.live]="msg.isThinking"
+                  [id]="'thinking-body-' + i">{{ msg.thinking }}</div>
+              </div>
               <div class="message-text" [innerHTML]="formatMessage(msg.content)"></div>
               <!-- Tool call indicators -->
               <div *ngIf="msg.toolCalls?.length" class="tool-calls">
@@ -337,6 +351,52 @@ import { ChatService, ChatMessage, ChatStatus, ModelOption } from '../../service
 
     .message-text { white-space: pre-wrap; word-break: break-word; font-size: 0.9em; line-height: 1.5; }
 
+    /* Thinking panel */
+    .thinking-panel {
+      margin-bottom: 8px;
+      border: 1px solid rgba(123, 31, 162, 0.25);
+      border-radius: 8px;
+      background: rgba(123, 31, 162, 0.05);
+      overflow: hidden;
+    }
+    .thinking-header {
+      display: flex; align-items: center; gap: 6px;
+      width: 100%;
+      padding: 6px 10px;
+      background: transparent;
+      border: 0;
+      cursor: pointer;
+      font: inherit;
+      font-size: 0.8em;
+      text-align: left;
+      color: var(--text-secondary, #666);
+    }
+    .thinking-header:hover { background: rgba(123, 31, 162, 0.08); }
+    .thinking-header:focus-visible { outline: 2px solid #7b1fa2; outline-offset: -2px; }
+    .thinking-icon { font-size: 16px; width: 16px; height: 16px; color: #7b1fa2; }
+    .thinking-chevron {
+      font-size: 18px; width: 18px; height: 18px;
+      transform: rotate(-90deg);
+      transition: transform 0.2s ease;
+    }
+    .thinking-chevron.open { transform: rotate(0deg); }
+    .thinking-panel.live .thinking-label { animation: toolPulse 1.4s ease-in-out infinite; }
+    .thinking-body {
+      max-height: 220px;
+      overflow-y: auto;
+      padding: 8px 12px 10px;
+      border-top: 1px solid rgba(123, 31, 162, 0.15);
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 0.8em;
+      line-height: 1.5;
+      color: var(--text-secondary, #666);
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .thinking-panel.live .thinking-label { animation: none; }
+      .thinking-chevron { transition: none; }
+    }
+
     .tool-calls {
       display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px;
     }
@@ -530,6 +590,25 @@ export class ChatComponent implements OnInit, OnDestroy, AfterViewChecked {
     this.chatService.clearConversation();
   }
 
+  /** Keep each message's DOM node across streamed updates so the thinking panel keeps its scroll position and focus. */
+  trackByIndex(index: number): number {
+    return index;
+  }
+
+  toggleThinking(index: number): void {
+    this.chatService.toggleThinking(index);
+  }
+
+  thinkingLabel(msg: ChatMessage): string {
+    if (msg.isThinking) return 'Thinking…';
+    const ms = msg.thinkingMs;
+    if (ms == null) return 'Thought process';
+    if (ms < 1000) return 'Thought for <1s';
+    const secs = ms / 1000;
+    if (secs < 60) return `Thought for ${secs.toFixed(1)}s`;
+    return `Thought for ${Math.floor(secs / 60)}m ${Math.round(secs % 60)}s`;
+  }
+
   retryMessage(): void {
     if (this.isLoading) return;
     this.isLoading = true;
@@ -577,7 +656,11 @@ export class ChatComponent implements OnInit, OnDestroy, AfterViewChecked {
   private scrollToBottom(): void {
     try {
       const el = this.messagesContainer?.nativeElement;
-      if (el) el.scrollTop = el.scrollHeight;
+      if (el) {
+        el.scrollTop = el.scrollHeight;
+        // Keep the live thinking text pinned to its newest line.
+        el.querySelectorAll('.thinking-body.live').forEach((b: HTMLElement) => { b.scrollTop = b.scrollHeight; });
+      }
     } catch {}
   }
 }
