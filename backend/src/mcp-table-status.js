@@ -115,8 +115,11 @@ async function handleToolCall(name, args) {
     }
 
     case 'get_table_history': {
-      const history = tableService.getTableHistory(args.table_id);
-      if (!history || history.length === 0) return `No history found for ${args.table_id}.`;
+      // Models sometimes use the sim-service key (table_ref) or a short name; accept them.
+      const tableId = args.table_id ?? args.table_ref ?? args.table ?? args.id;
+      if (!tableId) return 'Error: table_id is required (e.g. "table-4").';
+      const history = tableService.getTableHistory(String(tableId));
+      if (!history || history.length === 0) return `No history found for ${tableId}.`;
       return JSON.stringify(history, null, 2);
     }
 
